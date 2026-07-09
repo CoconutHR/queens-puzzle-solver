@@ -2,7 +2,7 @@
 
 All notable changes to this project will be documented here.
 
-## [Unreleased]
+## [0.2.0] - 2026-07-09
 
 ### Added
 - **Web UI** deployed to GitHub Pages with four pages:

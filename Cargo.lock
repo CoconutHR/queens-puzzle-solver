@@ -390,7 +390,7 @@ dependencies = [
 
 [[package]]
 name = "queens-puzzle"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "colored",
@@ -401,7 +401,7 @@ dependencies = [
 
 [[package]]
 name = "queens-puzzle-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "itertools",
  "log",
@@ -412,7 +412,7 @@ dependencies = [
 
 [[package]]
 name = "queens-puzzle-wasm"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "getrandom",
  "queens-puzzle-core",
