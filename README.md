@@ -164,14 +164,18 @@ Ideas for future work, roughly in priority order:
   - a rule for two or three candidate cells adjacent to each other crossing out their shared neighbours;
   - splitting the naked-set rule into more specific, easier-to-spot cases.
 - **Record the list of changes** the solver makes, to support a move history / undo and richer hints.
-- **Faster generation**: when growing a region, immediately absorb any unregioned "islands" it
-  encloses (those cells can only belong to that region).
+- **Faster generation**: the current region-growing approach revisits the same set of cells from
+  multiple starting points; explore the tree by picking *sets of cells* to assign to a colour
+  instead — this also eliminates islands naturally (a cell surrounded by other regions can only
+  belong to the enclosing one), removing the need for the island-absorption special case.
 - **Performance**: memoise `queens()` rather than rescanning the board.
 - **Refactor** the core puzzle representation (grid, cell state, IO, change list) into its own module/crate.
 - **Fetch command** to download puzzles directly from the archive API.
 - **Built-in puzzle library** for the Play page (curated set shown on first load / "New puzzle").
 - **Generator progress reporting** for large boards (n≥9): a step-based `WasmGenerator` WASM type
   would allow the UI to show real progress and support cancellation mid-search.
+- **Rules page discoverability and clarity**: make the rules page easier to find in the UI and add
+  image examples for each deduction technique.
 - **Screenshot importer**: recognise a pasted image of a Queens board and extract the region layout.
 
 ## License
