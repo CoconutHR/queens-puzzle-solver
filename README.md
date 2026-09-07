@@ -105,12 +105,23 @@ cargo run -- solve puzzles/screenshot-1.png
 
 ### 程序化调用（给 Python 等外部程序用）
 
-`analyze` 子命令专为程序调用设计：**图片字节从 stdin 传入（不落盘），JSON 从 stdout 返回**。
+`analyze` 子命令专为程序调用设计。它支持**两种输入方式**，输出都是 JSON：
 
 ```sh
-cargo install --path .                      # 装到 ~/.cargo/bin，之后可直接用
-queens-puzzle analyze - < screenshot.png    # 从 stdin 读字节
-queens-puzzle analyze screenshot.png        # 也可以直接给路径
+cargo install --path .                    # 一次性装到 ~/.cargo/bin，之后直接用 queens-puzzle
+
+# 方式 A：离线传路径（图片在磁盘上，最简单）
+queens-puzzle analyze screenshot.png
+
+# 方式 B：从 stdin 传字节（图片在内存里，不落盘）
+queens-puzzle analyze - < screenshot.png
+queens-puzzle analyze -                   # 也可由管道/程序写入
+```
+
+想看人类可读的彩色棋盘而不是 JSON，用 `solve`（同样支持两种输入）：
+
+```sh
+queens-puzzle solve screenshot.png        # 输出：原始盘面、解完的盘面、难度评级
 ```
 
 成功时退出码 0，stdout 输出 JSON：
@@ -137,18 +148,24 @@ queens-puzzle analyze screenshot.png        # 也可以直接给路径
 
 失败时**退出码非 0，原因写 stderr**，stdout 不输出——外部程序先看退出码再决定是否解析。
 
-Python 侧示例见 [`scripts/analyze_screenshot.py`](scripts/analyze_screenshot.py)：
+Python 侧示例见 [`scripts/analyze_screenshot.py`](scripts/analyze_screenshot.py)，
+两种方式都封装好了：
 
 ```python
-proc = subprocess.run(
-    ["queens-puzzle", "analyze", "-"],
-    input=png_bytes,          # 字节直传，不落盘
-    capture_output=True, timeout=30,
-)
-if proc.returncode != 0:
-    raise RuntimeError(proc.stderr.decode())
-result = json.loads(proc.stdout)
+from analyze_screenshot import analyze_file, analyze_screenshot, queen_pixels
+
+# 方式 A：图片在磁盘上 —— 直接传路径
+r = analyze_file("screenshot.png")
+
+# 方式 B：图片在内存里 —— 传字节（经 stdin，不落盘）
+r = analyze_screenshot(png_bytes)
+
+print(r["size"], r["difficulty"])     # 8 Medium
+print(r["solution"])                  # [[2,0],[5,1],...]
+print(queen_pixels(r))                # [(97,1085),(238,1507),...] 可直接点击的坐标
 ```
+
+两个函数都带 30s 超时，失败时抛 `AnalyzeError`（内含退出码与 stderr）。
 
 **为什么用 subprocess 而不是 PyO3**：子进程崩溃（返回非零码 + stderr）不会拖垮调用方进程，
 故障可观测、可重试；PyO3 扩展跑在 Python 进程内，一旦崩溃就是宿主进程静默死亡。

@@ -1,13 +1,19 @@
-"""Python 调用示例：把图片字节直接传给 Rust 二进制，不落盘。
+"""Python 调用示例。
 
-用法：
+两种输入方式，按场景选：
+
+1. 传字节（图片已在内存）：analyze_screenshot(png_bytes)
+   字节经 stdin 送入，不落盘。
+2. 传路径（图片在磁盘，离线）：analyze_file("shot.png")
+   直接把路径作为参数传给二进制。
+
+命令行：
     python scripts/analyze_screenshot.py <图片路径>
-    # 或作为库使用：analyze_screenshot(png_bytes)
 
 设计要点（面向风控敏感的企业环境）：
 - 用 subprocess 而非 PyO3：崩溃只影响子进程，Python 主进程存活，可捕获退出码与 stderr
-- 图片字节经 stdin 传入，不写临时文件
 - 带超时，避免异常图片导致挂起
+- 失败时二进制返回非零码 + stderr，这里转成 AnalyzeError 抛出
 """
 
 from __future__ import annotations
@@ -26,28 +32,12 @@ class AnalyzeError(RuntimeError):
     """解析失败。保留退出码与 stderr 便于排查，而不是让进程崩掉。"""
 
 
-def analyze_screenshot(
-    data: bytes,
-    binary: str = DEFAULT_BINARY,
-    timeout: float = 30.0,
-) -> dict[str, Any]:
-    """把图片字节传给二进制，返回解析结果。
-
-    Args:
-        data: 图片的原始字节（PNG / JPEG / WebP）。
-        binary: 二进制路径，默认从 PATH 查找。
-        timeout: 超时秒数。
-
-    Returns:
-        含 size / board / regions / cells / solution / difficulty / palette 的字典。
-
-    Raises:
-        AnalyzeError: 二进制返回非零退出码或超时。
-    """
+def _run(args: list[str], *, input_data: bytes | None, binary: str, timeout: float) -> dict[str, Any]:
+    """执行二进制并把 stdout 解析为 JSON。"""
     try:
         proc = subprocess.run(
-            [binary, "analyze", "-"],
-            input=data,          # 字节直传 stdin，不落盘
+            [binary, "analyze", *args],
+            input=input_data,
             capture_output=True,
             timeout=timeout,
         )
@@ -66,6 +56,50 @@ def analyze_screenshot(
         raise AnalyzeError(f"返回内容不是合法 JSON: {exc}") from exc
 
 
+def analyze_screenshot(
+    data: bytes,
+    binary: str = DEFAULT_BINARY,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """把图片字节传给二进制（经 stdin，不落盘），返回解析结果。
+
+    Args:
+        data: 图片的原始字节（PNG / JPEG / WebP）。
+        binary: 二进制路径，默认从 PATH 查找。
+        timeout: 超时秒数。
+
+    Returns:
+        含 size / board / regions / cells / solution / difficulty / palette 的字典。
+
+    Raises:
+        AnalyzeError: 二进制返回非零退出码或超时。
+    """
+    return _run(["-"], input_data=data, binary=binary, timeout=timeout)
+
+
+def analyze_file(
+    path: str | Path,
+    binary: str = DEFAULT_BINARY,
+    timeout: float = 30.0,
+) -> dict[str, Any]:
+    """把图片路径直接传给二进制（离线使用，不经 stdin），返回解析结果。
+
+    适合图片已经在磁盘上的场景（例如刚保存的截图），比读成字节再传更省事。
+
+    Args:
+        path: 图片文件路径。
+        binary: 二进制路径，默认从 PATH 查找。
+        timeout: 超时秒数。
+
+    Raises:
+        AnalyzeError: 二进制返回非零退出码或超时，或文件不存在。
+    """
+    p = Path(path)
+    if not p.is_file():
+        raise AnalyzeError(f"文件不存在: {p}")
+    return _run([str(p)], input_data=None, binary=binary, timeout=timeout)
+
+
 def queen_pixels(result: dict[str, Any]) -> list[tuple[int, int]]:
     """解对应的像素中心坐标，便于驱动自动点击。"""
     cells = result["cells"]
@@ -82,7 +116,8 @@ def main() -> int:
         print(f"文件不存在: {path}", file=sys.stderr)
         return 2
 
-    result = analyze_screenshot(path.read_bytes())
+    # 用路径模式（离线）。若要演示字节模式，改成 analyze_screenshot(path.read_bytes())
+    result = analyze_file(path)
 
     print(f"棋盘: {result['size']}x{result['size']}  "
           f"区域: {result['board']}")
