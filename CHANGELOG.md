@@ -22,9 +22,14 @@ All notable changes to this project will be documented here.
 - 新增 `docs/pipeline.svg` 处理链路图，并在 README 中引用
 
 ### 新增
-- **截图识别**（`io::image` 模块）：通过颜色梯度检测定位网格线和棋盘边界，提取 n×n 区域布局。
-  对网格线与边距颜色无要求（白色、黑色、米色均可）。CLI 按 `.png` / `.jpg` / `.webp` 扩展名自动分派。
-  测试用例：`puzzles/screenshot-1.png`（8×8 白线米底）
+- **截图识别**（`io::image` 模块）：从 PNG / JPG / WebP 截图中提取 n×n 区域布局，
+  CLI 按扩展名自动分派。采用两种互补策略，无需手动圈选棋盘：
+  1. **饱和度 mask + 行列投影**（首选，适合带 UI 的完整手机截图）：格子是彩色，
+     而白线、米色边距和 UI 文字都是低饱和度，据此生成 mask 再做行列投影定位棋盘与每格
+  2. **梯度剖面回退**（适合已裁剪好的棋盘，或格子颜色偏浅/pastel 导致策略 1 失效时）
+  定位后对每格中心区域采样平均色，再按颜色聚类得到区域
+- 测试用例：`puzzles/screenshot-1.png`（裁剪，8×8 白线米底）、
+  `puzzles/screenshot-full.png`（完整手机截图 1179×2556，棋盘 x=31..1148, y=738..1855）
 - 依赖：`core` 新增 `image = "0.25"`
 
 ## [0.2.0] - 2026-07-09
