@@ -75,6 +75,17 @@ pub fn try_from_path(path: &Path) -> Result<QueensPuzzle, String> {
     analyze(&img)
 }
 
+/// Parse a puzzle from in-memory image bytes (PNG / JPEG / WebP).
+///
+/// Lets a caller pass image data straight from memory — e.g. Python writing to
+/// this binary's stdin — without writing a temporary file.
+pub fn try_from_bytes(data: &[u8]) -> Result<QueensPuzzle, String> {
+    let img = image::load_from_memory(data)
+        .map_err(|e| format!("failed to decode image: {e}"))?
+        .to_rgb8();
+    analyze(&img)
+}
+
 /// Analyze a Queens screenshot and return the corresponding puzzle.
 ///
 /// See [`try_from_path`] for the two strategies. Both produce per-cell pixel
@@ -86,12 +97,12 @@ pub fn analyze(img: &RgbImage) -> Result<QueensPuzzle, String> {
     }
 
     if let Some(grid) = detect_by_projection(img) {
-        if let Ok(puzzle) = build_puzzle(img, &grid) {
+        if let Ok((puzzle, _, _)) = build_puzzle(img, &grid) {
             return Ok(puzzle);
         }
     }
     if let Some(grid) = detect_by_gradient(img) {
-        if let Ok(puzzle) = build_puzzle(img, &grid) {
+        if let Ok((puzzle, _, _)) = build_puzzle(img, &grid) {
             return Ok(puzzle);
         }
     }
@@ -526,12 +537,85 @@ struct Sample {
     hsv: Hsv,
 }
 
-fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
+/// Pixel geometry of a located board, for callers that need screen coordinates
+/// (e.g. driving clicks) rather than just row/column indices.
+pub struct BoardGeometry {
+    /// Board size (n for an n x n board).
+    pub size: usize,
+    /// Board bounding box in image coordinates.
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+    /// Center pixel of each cell, indexed `[row][col]`.
+    pub cell_centers: Vec<Vec<(u32, u32)>>,
+    /// Average color of each cell, indexed `[row][col]`.
+    pub cell_colors: Vec<Vec<Rgb<u8>>>,
+    /// Region id of each cell, indexed `[row][col]`.
+    pub regions: Vec<Vec<usize>>,
+}
+
+/// Like [`analyze`], but also returns the pixel geometry of the detected board.
+pub fn analyze_detailed(img: &RgbImage) -> Result<(QueensPuzzle, BoardGeometry), String> {
+    let (w, h) = img.dimensions();
+    if w < 150 || h < 150 {
+        return Err("image is too small".to_string());
+    }
+
+    let mut last_err: Option<String> = None;
+    for strategy in [detect_by_projection, detect_by_gradient] {
+        if let Some(grid) = strategy(img) {
+            match build_puzzle(img, &grid) {
+                Ok((puzzle, regions, colors)) => {
+                    let cell_centers = (0..grid.size)
+                        .map(|row| {
+                            (0..grid.size)
+                                .map(|col| {
+                                    let (x0, x1) = grid.x_runs[col];
+                                    let (y0, y1) = grid.y_runs[row];
+                                    (((x0 + x1) / 2) as u32, ((y0 + y1) / 2) as u32)
+                                })
+                                .collect()
+                        })
+                        .collect();
+                    let left = grid.x_runs.first().map(|&(a, _)| a as u32).unwrap_or(0);
+                    let right = grid.x_runs.last().map(|&(_, b)| b as u32).unwrap_or(0);
+                    let top = grid.y_runs.first().map(|&(a, _)| a as u32).unwrap_or(0);
+                    let bottom = grid.y_runs.last().map(|&(_, b)| b as u32).unwrap_or(0);
+
+                    return Ok((
+                        puzzle,
+                        BoardGeometry {
+                            size: grid.size,
+                            left,
+                            top,
+                            right,
+                            bottom,
+                            cell_centers,
+                            cell_colors: colors,
+                            regions,
+                        },
+                    ));
+                }
+                Err(e) => last_err = Some(e),
+            }
+        }
+    }
+    Err(last_err.unwrap_or_else(|| "could not locate a Queens board in the image".to_string()))
+}
+
+/// Result of building a puzzle from a located grid: the puzzle, the region id
+/// matrix, and the per-cell sampled colors.
+type BuiltPuzzle = (QueensPuzzle, Vec<Vec<usize>>, Vec<Vec<Rgb<u8>>>);
+
+/// Sample every cell and cluster by color; returns the region matrix and per-cell colors.
+fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<BuiltPuzzle, String> {
     let n = grid.size;
-    let mut samples: Vec<Sample> = Vec::with_capacity(n * n);
+    let mut samples: Vec<Vec<Sample>> = Vec::with_capacity(n);
     for row in 0..n {
+        let mut row_samples = Vec::with_capacity(n);
         for col in 0..n {
-            samples.push(sample_cell(
+            row_samples.push(sample_cell(
                 img,
                 grid.x_runs[col].0 as u32,
                 grid.y_runs[row].0 as u32,
@@ -539,13 +623,17 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
                 grid.y_runs[row].1 as u32,
             ));
         }
+        samples.push(row_samples);
     }
 
-    let ids = cluster_colors(&samples, COLOR_DISTANCE_THRESHOLD);
+    let flat: Vec<Sample> = samples.iter().flatten().copied().collect();
+    let ids = cluster_colors(&flat, COLOR_DISTANCE_THRESHOLD);
 
     let mut region_cells: Vec<Vec<Cell>> = Vec::new();
     let mut color_to_region: std::collections::HashMap<usize, usize> =
         std::collections::HashMap::new();
+    let mut regions = vec![vec![0usize; n]; n];
+
     for (i, &cid) in ids.iter().enumerate() {
         let row = i / n;
         let col = i % n;
@@ -558,6 +646,7 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
                 r
             }
         };
+        regions[row][col] = region;
         region_cells[region].push(Cell { row, col });
     }
 
@@ -568,7 +657,11 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
         ));
     }
 
-    Ok(QueensPuzzle::new(region_cells))
+    let colors: Vec<Vec<Rgb<u8>>> = samples
+        .iter()
+        .map(|r| r.iter().map(|s| s.rgb).collect())
+        .collect();
+    Ok((QueensPuzzle::new(region_cells), regions, colors))
 }
 
 /// 采样格子中心区域，忽略低色度像素（残留网格边、抗锯齿）。

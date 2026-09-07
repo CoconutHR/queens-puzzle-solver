@@ -103,6 +103,57 @@ cargo run -- solve puzzles/screenshot-1.png
 
 输出依次为：原始盘面、解完的盘面、难度评级。
 
+### 程序化调用（给 Python 等外部程序用）
+
+`analyze` 子命令专为程序调用设计：**图片字节从 stdin 传入（不落盘），JSON 从 stdout 返回**。
+
+```sh
+cargo install --path .                      # 装到 ~/.cargo/bin，之后可直接用
+queens-puzzle analyze - < screenshot.png    # 从 stdin 读字节
+queens-puzzle analyze screenshot.png        # 也可以直接给路径
+```
+
+成功时退出码 0，stdout 输出 JSON：
+
+```json
+{
+  "size": 8,
+  "board": {"left": 31, "top": 738, "right": 1148, "bottom": 1855},
+  "regions": [[0,0,1,1,1,1,1,2], "..."],
+  "cells":   [[{"row":0,"col":0,"region":0,"x":97,"y":804,"rgb":[206,164,0]}, "..."], "..."],
+  "solution": [[2,0],[5,1],[1,2],[3,3],[0,4],[6,5],[4,6],[7,7]],
+  "difficulty": "Medium",
+  "palette": [[206,164,0],[42,140,83], "..."]
+}
+```
+
+| 字段 | 说明 |
+|------|------|
+| `regions` | 区域布局，行列 → 区域 id |
+| `cells[].x/y` | 每格的**像素中心**，可直接用于自动点击 |
+| `solution` | 皇后落点 `[row, col]`；配合 `cells` 即得点击坐标 |
+| `difficulty` | 评级；无解或多解时为 `null` |
+| `palette` | 区域 id → 代表色 |
+
+失败时**退出码非 0，原因写 stderr**，stdout 不输出——外部程序先看退出码再决定是否解析。
+
+Python 侧示例见 [`scripts/analyze_screenshot.py`](scripts/analyze_screenshot.py)：
+
+```python
+proc = subprocess.run(
+    ["queens-puzzle", "analyze", "-"],
+    input=png_bytes,          # 字节直传，不落盘
+    capture_output=True, timeout=30,
+)
+if proc.returncode != 0:
+    raise RuntimeError(proc.stderr.decode())
+result = json.loads(proc.stdout)
+```
+
+**为什么用 subprocess 而不是 PyO3**：子进程崩溃（返回非零码 + stderr）不会拖垮调用方进程，
+故障可观测、可重试；PyO3 扩展跑在 Python 进程内，一旦崩溃就是宿主进程静默死亡。
+对风控敏感的环境，前者的故障形态安全得多。
+
 **已知限制**：截图里如果已经放置了皇后或叉，中心采样会被这些深色图案干扰，
 可能拆出多余区域。要支持带进度的截图，需要额外做图案识别（见"后续方向"）。
 
