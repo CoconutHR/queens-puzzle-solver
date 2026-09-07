@@ -13,13 +13,13 @@ const MIN_CHROMA: u8 = 18;
 
 /// 亮度保护，避免把深色文字或接近纯白的高光当成棋盘颜色。
 const MIN_VALUE: u8 = 25;
-const MAX_VALUE: u8 = 250;
+const MAX_VALUE: u8 = 254;
 
 /// 行投影中，纵向候选区域所需的彩色像素比例。
 const BOARD_RUN_THRESHOLD: f32 = 0.18;
 
 /// 单个格子所需的彩色像素比例。
-const GRID_RUN_THRESHOLD: f32 = 0.55;
+const GRID_RUN_THRESHOLD: f32 = 0.45;
 
 /// 找大块候选区域时允许合并的缺口（按图像高度比例自适应）。
 const BOARD_MERGE_GAP_RATIO: f32 = 0.012;
@@ -28,8 +28,11 @@ const BOARD_MERGE_GAP_RATIO: f32 = 0.012;
 const MAX_SQUARE_ERROR: f32 = 0.12;
 
 /// 支持的棋盘边长范围。
-const MIN_BOARD_SIZE: usize = 4;
-const MAX_BOARD_SIZE: usize = 16;
+const MIN_BOARD_SIZE: usize = 3;
+
+/// 单元格的最小建议像素尺寸。
+/// 不再用固定 MAX_BOARD_SIZE 限制棋盘边长，而是根据图像分辨率动态计算。
+const MIN_CELL_PIXELS: usize = 12;
 
 /// 格子尺寸的变异系数上限（标准差 / 均值）。
 const MAX_CELL_SIZE_CV: f32 = 0.10;
@@ -38,7 +41,7 @@ const MAX_CELL_SIZE_CV: f32 = 0.10;
 const MAX_CELL_SPACING_CV: f32 = 0.18;
 
 /// 格子内部彩色像素占比下限，用于排除"看着像格子其实是空的"误判。
-const MIN_CELL_OCCUPANCY: f32 = 0.82;
+const MIN_CELL_OCCUPANCY: f32 = 0.70;
 
 // --- 采样与聚类参数 ---
 
@@ -146,8 +149,11 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
 
         let cols = col_projection(&mask, width, top, bottom);
         let x_runs = find_runs(&cols, GRID_RUN_THRESHOLD, 4, 0);
-        if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&x_runs.len()) {
-            eprintln!("[DEBUG]   x_runs.len()={} out of range", x_runs.len());
+        if !is_valid_board_size(x_runs.len(), width, height, MIN_CELL_PIXELS) {
+            eprintln!(
+                "[DEBUG]   x_runs.len()={} out of range for image {}x{}",
+                x_runs.len(), width, height
+            );
             *reject_reasons.entry("col_count").or_insert(0) += 1;
             continue;
         }
@@ -158,14 +164,22 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
 
         let local_rows = local_row_projection(&mask, width, left, right, top, bottom);
         let local_y = find_runs(&local_rows, GRID_RUN_THRESHOLD, 4, 0);
-        if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&local_y.len()) {
-            eprintln!("[DEBUG]   local_y.len()={} out of range", local_y.len());
+        if !is_valid_board_size(local_y.len(), width, height, MIN_CELL_PIXELS) {
+            eprintln!(
+                "[DEBUG]   local_y.len()={} out of range for image {}x{}",
+                local_y.len(), width, height
+            );
             *reject_reasons.entry("row_count").or_insert(0) += 1;
             continue;
         }
 
         // 棋盘必须是 N × N
         if x_runs.len() != local_y.len() {
+            eprintln!(
+                "[DEBUG]   grid dimension mismatch: x_runs={} y_runs={}",
+                x_runs.len(), local_y.len()
+            );
+            *reject_reasons.entry("dimension_mismatch").or_insert(0) += 1;
             continue;
         }
         let size = x_runs.len();
@@ -220,7 +234,9 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         }
 
         // 多特征加权求和。用加法而不是连乘，避免单项偏低就整体归零。
-        let size_score = (size as f32).ln_1p() / (MAX_BOARD_SIZE as f32).ln_1p();
+        // 尺寸只参与候选排序，不再使用固定 MAX_BOARD_SIZE。
+        // 这里用检测到的 cell 数做温和的对数加权，避免大棋盘被固定上限影响。
+        let size_score = (size as f32).ln_1p();
         let square_score = 1.0 - square_error;
         let uniformity =
             (1.0 - width_cv * 3.0).clamp(0.0, 1.0) * (1.0 - height_cv * 3.0).clamp(0.0, 1.0);
@@ -363,6 +379,27 @@ fn find_runs(
     out
 }
 
+/// 判断检测出的棋盘边长是否合理。
+///
+/// 棋盘边长不再有固定的 MAX_BOARD_SIZE；只要图像分辨率允许每个格子保留
+/// 至少 MIN_CELL_PIXELS 像素，就接受这个 N。
+fn is_valid_board_size(
+    n: usize,
+    image_width: usize,
+    image_height: usize,
+    min_cell_pixels: usize,
+) -> bool {
+    if n < MIN_BOARD_SIZE || min_cell_pixels == 0 {
+        return false;
+    }
+
+    let max_n_by_width = image_width / min_cell_pixels;
+    let max_n_by_height = image_height / min_cell_pixels;
+    let max_n = max_n_by_width.min(max_n_by_height);
+
+    n <= max_n
+}
+
 fn gaps(runs: &[(usize, usize)]) -> Vec<usize> {
     if runs.len() < 2 {
         return Vec::new();
@@ -444,7 +481,7 @@ fn detect_by_gradient(img: &RgbImage) -> Option<Grid> {
 
     let n_h = ((h_end - h_start) as f64 / cell as f64).round() as usize;
     let n_w = ((v_end - v_start) as f64 / cell as f64).round() as usize;
-    if n_h != n_w || !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&n_h) {
+    if n_h != n_w || !is_valid_board_size(n_h, w as usize, h as usize, MIN_CELL_PIXELS) {
         return None;
     }
     let size = n_h;
