@@ -38,6 +38,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Command::Solve { file, json, id } => {
             let puzzle = if json {
                 io::archived_queens::read(file, id)?
+            } else if is_image(&file) {
+                io::image::try_from_path(&file)?
             } else {
                 io::text::read_puzzle_text(file)
             };
@@ -46,6 +48,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     Ok(())
+}
+
+fn is_image(path: &std::path::Path) -> bool {
+    matches!(
+        path.extension().and_then(|e| e.to_str()),
+        Some(ext) if ext.eq_ignore_ascii_case("png")
+            || ext.eq_ignore_ascii_case("jpg")
+            || ext.eq_ignore_ascii_case("jpeg")
+            || ext.eq_ignore_ascii_case("webp")
+    )
 }
 
 fn solve_puzzle(puzzle: &QueensPuzzle) {

@@ -21,6 +21,12 @@ All notable changes to this project will be documented here.
 - README、CLAUDE.md、docs/formats.md 改为中文说明
 - 新增 `docs/pipeline.svg` 处理链路图，并在 README 中引用
 
+### 新增
+- **截图识别**（`io::image` 模块）：通过颜色梯度检测定位网格线和棋盘边界，提取 n×n 区域布局。
+  对网格线与边距颜色无要求（白色、黑色、米色均可）。CLI 按 `.png` / `.jpg` / `.webp` 扩展名自动分派。
+  测试用例：`puzzles/screenshot-1.png`（8×8 白线米底）
+- 依赖：`core` 新增 `image = "0.25"`
+
 ## [0.2.0] - 2026-07-09
 
 ### Added
