@@ -42,9 +42,6 @@ const MIN_CELL_OCCUPANCY: f32 = 0.82;
 
 // --- 采样与聚类参数 ---
 
-/// 采样格子中心多大比例的区域。
-const SAMPLE_RATIO: f32 = 0.55;
-
 /// 采样时忽略色度低于此值的像素（残留网格边、抗锯齿）。
 const SAMPLE_MIN_CHROMA: u8 = 8;
 
@@ -96,12 +93,15 @@ pub fn analyze(img: &RgbImage) -> Result<QueensPuzzle, String> {
         return Err("image is too small".to_string());
     }
 
+    eprintln!("[DEBUG] analyze: image {}x{}", w, h);
     if let Some(grid) = detect_by_projection(img) {
+        eprintln!("[DEBUG] projection found: {}x{}", grid.size, grid.size);
         if let Ok((puzzle, _, _)) = build_puzzle(img, &grid) {
             return Ok(puzzle);
         }
     }
     if let Some(grid) = detect_by_gradient(img) {
+        eprintln!("[DEBUG] gradient found: {}x{}", grid.size, grid.size);
         if let Ok((puzzle, _, _)) = build_puzzle(img, &grid) {
             return Ok(puzzle);
         }
@@ -131,7 +131,13 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
     let merge_gap = ((height as f32) * BOARD_MERGE_GAP_RATIO).round().max(4.0) as usize;
     let row_candidates = find_runs(&rows, BOARD_RUN_THRESHOLD, merge_gap, merge_gap);
 
+    eprintln!("[DEBUG] row_candidates: {} runs", row_candidates.len());
+    for (i, &(t, b)) in row_candidates.iter().enumerate() {
+        eprintln!("  [{}] rows {}-{} (height={})", i, t, b, b-t+1);
+    }
+
     let mut best: Option<(Grid, f32)> = None;
+    let mut reject_reasons: std::collections::HashMap<&str, usize> = std::collections::HashMap::new();
 
     for &(top, bottom) in &row_candidates {
         if bottom - top + 1 < (height / 8).max(120) {
@@ -141,8 +147,11 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         let cols = col_projection(&mask, width, top, bottom);
         let x_runs = find_runs(&cols, GRID_RUN_THRESHOLD, 4, 0);
         if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&x_runs.len()) {
+            eprintln!("[DEBUG]   x_runs.len()={} out of range", x_runs.len());
+            *reject_reasons.entry("col_count").or_insert(0) += 1;
             continue;
         }
+        eprintln!("[DEBUG]   x_runs={} cols", x_runs.len());
 
         let left = x_runs.first()?.0;
         let right = x_runs.last()?.1;
@@ -150,6 +159,8 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         let local_rows = local_row_projection(&mask, width, left, right, top, bottom);
         let local_y = find_runs(&local_rows, GRID_RUN_THRESHOLD, 4, 0);
         if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&local_y.len()) {
+            eprintln!("[DEBUG]   local_y.len()={} out of range", local_y.len());
+            *reject_reasons.entry("row_count").or_insert(0) += 1;
             continue;
         }
 
@@ -168,6 +179,8 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         let bh = (y_runs.last()?.1 - y_runs.first()?.0 + 1) as f32;
         let square_error = (bw - bh).abs() / bw.max(bh);
         if square_error > MAX_SQUARE_ERROR {
+            eprintln!("[DEBUG]   square_error={:.3} > {}", square_error, MAX_SQUARE_ERROR);
+            *reject_reasons.entry("not_square").or_insert(0) += 1;
             continue;
         }
 
@@ -183,18 +196,26 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         let y_gap_cv = coefficient_of_variation(&y_gaps);
 
         if width_cv > MAX_CELL_SIZE_CV || height_cv > MAX_CELL_SIZE_CV {
+            eprintln!("[DEBUG]   CV w={:.3} h={:.3} > {}", width_cv, height_cv, MAX_CELL_SIZE_CV);
+            *reject_reasons.entry("cv_size").or_insert(0) += 1;
             continue;
         }
         if !x_gaps.is_empty() && x_gap_cv > MAX_CELL_SPACING_CV {
+            eprintln!("[DEBUG]   x_gap_cv={:.3} > {}", x_gap_cv, MAX_CELL_SPACING_CV);
+            *reject_reasons.entry("cv_xgap").or_insert(0) += 1;
             continue;
         }
         if !y_gaps.is_empty() && y_gap_cv > MAX_CELL_SPACING_CV {
+            eprintln!("[DEBUG]   y_gap_cv={:.3} > {}", y_gap_cv, MAX_CELL_SPACING_CV);
+            *reject_reasons.entry("cv_ygap").or_insert(0) += 1;
             continue;
         }
 
         // 每个格子内部必须真的填满了彩色，排除空心的误判。
         let occupancy = cell_occupancy_score(&mask, width, &x_runs, &y_runs);
         if occupancy < MIN_CELL_OCCUPANCY {
+            eprintln!("[DEBUG]   occupancy={:.3} < {}", occupancy, MIN_CELL_OCCUPANCY);
+            *reject_reasons.entry("occupancy").or_insert(0) += 1;
             continue;
         }
 
@@ -221,6 +242,20 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
         }
     }
 
+    match &best {
+        Some((g, score)) => eprintln!(
+            "[DEBUG] projection best: {}x{} score={:.2} bbox=({},{})-({},{})",
+            g.size, g.size, score,
+            g.x_runs.first().map(|&(_,e)|e).unwrap_or(0),
+            g.y_runs.first().map(|&(_,e)|e).unwrap_or(0),
+            g.x_runs.last().map(|&(e,_)|e).unwrap_or(0),
+            g.y_runs.last().map(|&(e,_)|e).unwrap_or(0),
+        ),
+        None => eprintln!("[DEBUG] projection: no valid candidate"),
+    }
+    for (reason, count) in &reject_reasons {
+        eprintln!("[DEBUG] rejected: {} × {}", reason, count);
+    }
     best.map(|(g, _)| g)
 }
 
@@ -743,50 +778,59 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<BuiltPuzzle, String> {
     Ok((QueensPuzzle::new(region_cells), regions, colors))
 }
 
-/// 采样格子中心区域，忽略低色度像素（残留网格边、抗锯齿）。
+/// Sample a cell using the **dominant color** of its entire area.
+///
+/// This is robust against placed-queen overlays (dark crowns/X marks drawn at
+/// the cell centre): the queen covers only a small fraction of pixels, so the
+/// underlying region colour remains the histogram mode.
+///
+/// Pixels below [`SAMPLE_MIN_CHROMA`] are ignored (grid lines, anti-aliasing).
 fn sample_cell(img: &RgbImage, left: u32, top: u32, right: u32, bottom: u32) -> Sample {
-    let w = (right - left + 1) as f32;
-    let h = (bottom - top + 1) as f32;
-    let cx = (left + right) as f32 / 2.0;
-    let cy = (top + bottom) as f32 / 2.0;
-    let half_w = w * SAMPLE_RATIO / 2.0;
-    let half_h = h * SAMPLE_RATIO / 2.0;
+    // Quantise to 4 bits per channel (16 levels) → 4096 buckets, fits in a
+    // fixed-size array on the stack with zero allocation.
+    const BUCKETS: usize = 4096; // 16³
+    const Q: u8 = 16; // 256 / 16
 
-    let x0 = (cx - half_w).max(left as f32) as u32;
-    let x1 = (cx + half_w).min(right as f32) as u32;
-    let y0 = (cy - half_h).max(top as f32) as u32;
-    let y1 = (cy + half_h).min(bottom as f32) as u32;
+    let mut hist: [u32; BUCKETS] = [0; BUCKETS];
+    // Also accumulate per-bucket sums for computing the mean of the winning bucket.
+    let mut sum_r: [u64; BUCKETS] = [0; BUCKETS];
+    let mut sum_g: [u64; BUCKETS] = [0; BUCKETS];
+    let mut sum_b: [u64; BUCKETS] = [0; BUCKETS];
 
-    let mut sr = 0u64;
-    let mut sg = 0u64;
-    let mut sb = 0u64;
-    let mut count = 0u64;
-
-    for y in y0..=y1 {
-        for x in x0..=x1 {
+    for y in top..=bottom {
+        for x in left..=right {
             let p = img.get_pixel(x, y);
-            let max = p[0].max(p[1]).max(p[2]);
-            let min = p[0].min(p[1]).min(p[2]);
-            if max - min >= SAMPLE_MIN_CHROMA {
-                sr += p[0] as u64;
-                sg += p[1] as u64;
-                sb += p[2] as u64;
-                count += 1;
+            let mx = p[0].max(p[1]).max(p[2]);
+            let mn = p[0].min(p[1]).min(p[2]);
+            if mx - mn >= SAMPLE_MIN_CHROMA {
+                let bi = (p[0] / Q) as usize * 256 + (p[1] / Q) as usize * 16 + (p[2] / Q) as usize;
+                hist[bi] += 1;
+                sum_r[bi] += p[0] as u64;
+                sum_g[bi] += p[1] as u64;
+                sum_b[bi] += p[2] as u64;
             }
         }
     }
 
-    let rgb = match (
-        sr.checked_div(count),
-        sg.checked_div(count),
-        sb.checked_div(count),
-    ) {
-        (Some(r), Some(g), Some(b)) => Rgb([r as u8, g as u8, b as u8]),
-        // count == 0: 中心区域没有彩色像素，退回单点采样。
-        _ => {
-            let p = img.get_pixel((left + right) / 2, (top + bottom) / 2);
-            Rgb([p[0], p[1], p[2]])
+    // Find the bucket with the most pixels.
+    let mut best = 0usize;
+    let mut best_count = 0u32;
+    for (i, &c) in hist.iter().enumerate() {
+        if c > best_count {
+            best_count = c;
+            best = i;
         }
+    }
+
+    let rgb = if best_count > 0 {
+        let r = (sum_r[best] / best_count as u64) as u8;
+        let g = (sum_g[best] / best_count as u64) as u8;
+        let b = (sum_b[best] / best_count as u64) as u8;
+        Rgb([r, g, b])
+    } else {
+        // Fallback: no chromatic pixel at all (shouldn't happen for real boards).
+        let p = img.get_pixel((left + right) / 2, (top + bottom) / 2);
+        Rgb([p[0], p[1], p[2]])
     };
 
     Sample {

@@ -31,6 +31,10 @@ DEFAULT_SOLVER = "../target/release/queens-puzzle"
 ANALYZE_TIMEOUT = 30.0
 TAP_DELAY = 0.35
 READY_TIMEOUT = 15.0
+# 棋盘提示框（物理像素，左上包含、右下排除）。只作搜索提示，可略大于棋盘；
+# 求解器返回的 board / cells 始终是原图坐标，点击时不需要加偏移。
+# 设为 None 则由求解器全图检测。
+BOARD_CROP: tuple[int, int, int, int] | None = (0, 710, 1179, 1880)
 
 
 class AnalyzeError(RuntimeError):
@@ -52,12 +56,21 @@ def resolve_solver(candidate: str) -> str:
     return found
 
 
-def analyze_bytes(solver: str, image: bytes, *, timeout: float = ANALYZE_TIMEOUT) -> dict[str, Any]:
-    """把 PNG 字节经 stdin 送进 `analyze -`，返回解析后的 JSON。"""
+def analyze_bytes(solver: str, image: bytes, *, crop: tuple[int, int, int, int] | None = None,
+                  timeout: float = ANALYZE_TIMEOUT) -> dict[str, Any]:
+    """把 PNG 字节经 stdin 送进 `analyze -`，返回解析后的 JSON。
+
+    crop 为可选搜索提示框（left, top, right, bottom）。它只缩小检测范围，
+    返回坐标仍是原图坐标系；框内找不到棋盘时求解器自动回退全图检测。
+    """
+    command = [solver, "analyze"]
+    if crop:
+        command += ["--crop", ",".join(str(int(value)) for value in crop)]
+    command.append("-")                        # `--crop` 必须在 `-` 之前
     try:
         proc = subprocess.run(
-            [solver, "analyze", "-"],
-            input=image,                    # 必须是 bytes，不要 text=True
+            command,
+            input=image,                       # 必须是 bytes，不要 text=True
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             timeout=timeout,
@@ -122,6 +135,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--iproxy", help="iproxy 绝对路径，未加入 PATH 时使用")
     parser.add_argument("--no-logs", action="store_true", help="不转发 10102，端口冲突时可用")
     parser.add_argument("--solver", default=DEFAULT_SOLVER)
+    parser.add_argument("--crop", help="临时覆盖棋盘提示框，格式 左,上,右,下，例如 0,710,1179,1880")
     parser.add_argument("--tap-delay", type=float, default=TAP_DELAY, help="每次点击后的间隔秒数")
     parser.add_argument("--dry-run", action="store_true", help="只识别并打印计划，不点击")
     args = parser.parse_args(argv)
@@ -129,6 +143,14 @@ def main(argv: list[str] | None = None) -> int:
     options = device_options(load_config(args.config))
     password = args.password if args.password is not None else options.get("password", "")
     solver = resolve_solver(args.solver)
+    crop: tuple[int, int, int, int] | None = BOARD_CROP
+    if args.crop:
+        parts = [part.strip() for part in args.crop.split(",")]
+        if len(parts) != 4:
+            print("--crop 需要四个整数：左,上,右,下", file=sys.stderr)
+            return 4
+        crop = tuple(int(part) for part in parts)  # type: ignore[assignment]
+
 
     overrides: dict[str, Any] = {}
     for key, value in (
@@ -166,10 +188,16 @@ def main(argv: list[str] | None = None) -> int:
 
             with client.locked():
                 png = client.screenshot()              # 无损 PNG，不用 HID JPEG
-            result = analyze_bytes(solver, png)
+            result = analyze_bytes(solver, png, crop=crop)
 
             size, difficulty, board = result.get("size"), result.get("difficulty"), result.get("board")
             print(f"棋盘 {size}x{size}  难度 {difficulty or '无评级'}  区域 {board}")
+            if BOARD_CROP and board:
+                cl, ct, cr, cb = BOARD_CROP
+                if not (cl <= board.get("left", 0) and ct <= board.get("top", 0)
+                        and board.get("right", 0) <= cr and board.get("bottom", 0) <= cb):
+                    print("提示：棋盘不在提示框内，可能已回退全图检测；如属预期可忽略。", file=sys.stderr)
+
 
             points = queen_pixels(result)
             if not points:
