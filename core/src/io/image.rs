@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 
 use image::{ImageReader, Rgb, RgbImage};
@@ -6,49 +5,64 @@ use image::{ImageReader, Rgb, RgbImage};
 use crate::grid::Cell;
 use crate::puzzle::QueensPuzzle;
 
-// --- 策略一（饱和度 mask + 投影）阈值 ---
+// --- 策略一（彩色 mask + 投影）参数 ---
 
-/// 像素被视为“棋盘彩色像素”所需的最小饱和度（max - min）。
-/// 白线、米色背景、UI 文字都是低饱和度，棋盘格子是彩色。
-const SAT_THRESHOLD: u8 = 18;
+/// 被视为"棋盘彩色像素"所需的最小色度（max - min）。
+/// 白线、米色背景、UI 文字都接近灰，棋盘格子是彩色。
+const MIN_CHROMA: u8 = 18;
+
+/// 亮度保护，避免把深色文字或接近纯白的高光当成棋盘颜色。
+const MIN_VALUE: u8 = 25;
+const MAX_VALUE: u8 = 250;
 
 /// 行投影中，纵向候选区域所需的彩色像素比例。
-const BOARD_CANDIDATE_THRESHOLD: f32 = 0.45;
+const BOARD_RUN_THRESHOLD: f32 = 0.18;
 
-/// 纵向候选区域的最小高度。
-const MIN_CANDIDATE_HEIGHT: usize = 100;
+/// 单个格子所需的彩色像素比例。
+const GRID_RUN_THRESHOLD: f32 = 0.55;
 
-/// 纵向候选区域允许合并的缺口（棋盘横向白线的宽度）。
-const CANDIDATE_MERGE_GAP: usize = 20;
-
-/// 行列投影中，单个格子所需的彩色像素比例。
-const GRID_RUN_THRESHOLD: f32 = 0.40;
-
-/// 单个格子的最小边长（像素）。
-const MIN_CELL: usize = 10;
+/// 找大块候选区域时允许合并的缺口（按图像高度比例自适应）。
+const BOARD_MERGE_GAP_RATIO: f32 = 0.012;
 
 /// 棋盘相对正方形允许的比例误差。
 const MAX_SQUARE_ERROR: f32 = 0.12;
 
-/// 格子尺寸允许的极差比例。
-const MAX_CELL_SPREAD: f32 = 0.18;
+/// 支持的棋盘边长范围。
+const MIN_BOARD_SIZE: usize = 4;
+const MAX_BOARD_SIZE: usize = 16;
 
-// --- 共用参数 ---
+/// 格子尺寸的变异系数上限（标准差 / 均值）。
+const MAX_CELL_SIZE_CV: f32 = 0.10;
 
-/// 颜色聚类距离（RGB 欧氏距离）。
-const COLOR_CLUSTER_DISTANCE: f32 = 35.0;
+/// 格间距的变异系数上限。
+const MAX_CELL_SPACING_CV: f32 = 0.18;
 
-/// 对格子中心多大比例的区域采样颜色。
-const SAMPLE_RATIO: f32 = 0.50;
+/// 格子内部彩色像素占比下限，用于排除"看着像格子其实是空的"误判。
+const MIN_CELL_OCCUPANCY: f32 = 0.82;
+
+// --- 采样与聚类参数 ---
+
+/// 采样格子中心多大比例的区域。
+const SAMPLE_RATIO: f32 = 0.55;
+
+/// 采样时忽略色度低于此值的像素（残留网格边、抗锯齿）。
+const SAMPLE_MIN_CHROMA: u8 = 8;
+
+/// HSV 空间的颜色聚类阈值。
+///
+/// 注意：这个值很关键。棋盘常用"同色相、不同明度"的配色（如深粉/浅粉、
+/// 深绿/浅绿），阈值过大会把它们合并成一类，导致区域数少于 n。
+/// 实测 0.16 会误合并，0.10 及以下稳定正确，这里取 0.08 留余量。
+const COLOR_DISTANCE_THRESHOLD: f32 = 0.08;
 
 /// Read a Queens puzzle from an image file (PNG / JPEG / WebP) and return the corresponding puzzle.
 ///
 /// Two complementary strategies are tried:
-/// 1. Saturation mask + projection — robust for full-screen screenshots with UI
-///    around the board (text, icons, buttons), because UI elements are largely
-///    low-saturation while board cells are colored.
-/// 2. Gradient-profile fallback — robust for tightly cropped boards and boards
-///    with pale/pastel cells whose saturation is too low for strategy 1.
+/// 1. Color mask + row/column projection — robust for full-screen screenshots with
+///    UI around the board, because UI elements are largely near-gray while board
+///    cells are strongly colored.
+/// 2. Gradient-profile fallback — used when the board is tightly cropped or cells
+///    are too pale for strategy 1 to separate from the background.
 pub fn try_from_path(path: &Path) -> Result<QueensPuzzle, String> {
     let reader = ImageReader::open(path)
         .map_err(|e| format!("failed to open image: {e}"))?
@@ -63,16 +77,15 @@ pub fn try_from_path(path: &Path) -> Result<QueensPuzzle, String> {
 
 /// Analyze a Queens screenshot and return the corresponding puzzle.
 ///
-/// See [`try_from_path`] for the two strategies used. Grid geometry is expressed
-/// as per-cell spans (`x_runs` / `y_runs`), which are then sampled and clustered
-/// by color to recover the regions.
+/// See [`try_from_path`] for the two strategies. Both produce per-cell pixel
+/// spans, which are then sampled and clustered by color to recover regions.
 pub fn analyze(img: &RgbImage) -> Result<QueensPuzzle, String> {
     let (w, h) = img.dimensions();
-    if w < 100 || h < 100 {
+    if w < 150 || h < 150 {
         return Err("image is too small".to_string());
     }
 
-    if let Some(grid) = detect_by_saturation(img) {
+    if let Some(grid) = detect_by_projection(img) {
         if let Ok(puzzle) = build_puzzle(img, &grid) {
             return Ok(puzzle);
         }
@@ -93,77 +106,104 @@ struct Grid {
 }
 
 // ============================================================
-// 策略一：饱和度 mask + 行列投影
+// 策略一：彩色 mask + 行列投影
 // ============================================================
 
-fn detect_by_saturation(img: &RgbImage) -> Option<Grid> {
+fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
     let width = img.width() as usize;
     let height = img.height() as usize;
 
-    let mask = create_color_mask(img);
-    let row_proj = row_projection(&mask, width, height);
+    let mask = build_color_mask(img);
+    let rows = row_projection(&mask, width, height);
 
-    // 棋盘横向白线会把纵向连续区域切开，所以允许合并小缺口。
-    let candidates = find_runs(
-        &row_proj,
-        BOARD_CANDIDATE_THRESHOLD,
-        MIN_CANDIDATE_HEIGHT,
-        CANDIDATE_MERGE_GAP,
-    );
-    if candidates.is_empty() {
-        return None;
-    }
+    // 缺口按图像高度自适应，小图/大图都能正确合并被白线切开的区域。
+    let merge_gap = ((height as f32) * BOARD_MERGE_GAP_RATIO).round().max(4.0) as usize;
+    let row_candidates = find_runs(&rows, BOARD_RUN_THRESHOLD, merge_gap, merge_gap);
 
     let mut best: Option<(Grid, f32)> = None;
 
-    for &(top, bottom) in &candidates {
-        if bottom - top + 1 < MIN_CANDIDATE_HEIGHT {
+    for &(top, bottom) in &row_candidates {
+        if bottom - top + 1 < (height / 8).max(120) {
             continue;
         }
 
-        // 列投影不能合并缺口 —— 格子之间正是靠白色分隔线切开的。
-        let col_proj = col_projection(&mask, width, top, bottom);
-        let x_runs = find_runs(&col_proj, GRID_RUN_THRESHOLD, MIN_CELL, 0);
+        let cols = col_projection(&mask, width, top, bottom);
+        let x_runs = find_runs(&cols, GRID_RUN_THRESHOLD, 4, 0);
+        if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&x_runs.len()) {
+            continue;
+        }
 
         let left = x_runs.first()?.0;
         let right = x_runs.last()?.1;
 
         let local_rows = local_row_projection(&mask, width, left, right, top, bottom);
-        let y_runs = find_runs(&local_rows, GRID_RUN_THRESHOLD, MIN_CELL, 0);
+        let local_y = find_runs(&local_rows, GRID_RUN_THRESHOLD, 4, 0);
+        if !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&local_y.len()) {
+            continue;
+        }
 
-        // 必须是 N × N
-        if x_runs.len() != y_runs.len() || !(4..=16).contains(&x_runs.len()) {
+        // 棋盘必须是 N × N
+        if x_runs.len() != local_y.len() {
             continue;
         }
         let size = x_runs.len();
 
-        // 棋盘必须接近正方形
+        let y_runs: Vec<(usize, usize)> = local_y
+            .into_iter()
+            .map(|(a, b)| (a + top, b + top))
+            .collect();
+
         let bw = (right - left + 1) as f32;
-        let bh = (bottom - top + 1) as f32;
+        let bh = (y_runs.last()?.1 - y_runs.first()?.0 + 1) as f32;
         let square_error = (bw - bh).abs() / bw.max(bh);
         if square_error > MAX_SQUARE_ERROR {
             continue;
         }
 
+        // 用变异系数（标准差/均值）而不是极差，对离群点更稳健。
         let widths: Vec<usize> = x_runs.iter().map(|&(a, b)| b - a + 1).collect();
         let heights: Vec<usize> = y_runs.iter().map(|&(a, b)| b - a + 1).collect();
-        if !is_uniform(&widths) || !is_uniform(&heights) {
+        let x_gaps = gaps(&x_runs);
+        let y_gaps = gaps(&y_runs);
+
+        let width_cv = coefficient_of_variation(&widths);
+        let height_cv = coefficient_of_variation(&heights);
+        let x_gap_cv = coefficient_of_variation(&x_gaps);
+        let y_gap_cv = coefficient_of_variation(&y_gaps);
+
+        if width_cv > MAX_CELL_SIZE_CV || height_cv > MAX_CELL_SIZE_CV {
+            continue;
+        }
+        if !x_gaps.is_empty() && x_gap_cv > MAX_CELL_SPACING_CV {
+            continue;
+        }
+        if !y_gaps.is_empty() && y_gap_cv > MAX_CELL_SPACING_CV {
             continue;
         }
 
-        let score = uniformity_score(&widths)
-            * uniformity_score(&heights)
-            * (1.0 - square_error)
-            * size as f32;
+        // 每个格子内部必须真的填满了彩色，排除空心的误判。
+        let occupancy = cell_occupancy_score(&mask, width, &x_runs, &y_runs);
+        if occupancy < MIN_CELL_OCCUPANCY {
+            continue;
+        }
+
+        // 多特征加权求和。用加法而不是连乘，避免单项偏低就整体归零。
+        let size_score = (size as f32).ln_1p() / (MAX_BOARD_SIZE as f32).ln_1p();
+        let square_score = 1.0 - square_error;
+        let uniformity =
+            (1.0 - width_cv * 3.0).clamp(0.0, 1.0) * (1.0 - height_cv * 3.0).clamp(0.0, 1.0);
+        let spacing =
+            (1.0 - x_gap_cv * 2.0).clamp(0.0, 1.0) * (1.0 - y_gap_cv * 2.0).clamp(0.0, 1.0);
+
+        let score =
+            occupancy * 4.0 + square_score * 3.0 + uniformity * 3.0 + spacing * 2.0 + size_score;
 
         if best.as_ref().map(|(_, s)| score > *s).unwrap_or(true) {
-            // y_runs 是相对 top 的偏移，这里统一转成绝对坐标。
-            let abs_y_runs = y_runs.iter().map(|&(a, b)| (a + top, b + top)).collect();
             best = Some((
                 Grid {
                     size,
                     x_runs: x_runs.clone(),
-                    y_runs: abs_y_runs,
+                    y_runs,
                 },
                 score,
             ));
@@ -173,7 +213,7 @@ fn detect_by_saturation(img: &RgbImage) -> Option<Grid> {
     best.map(|(g, _)| g)
 }
 
-fn create_color_mask(img: &RgbImage) -> Vec<u8> {
+fn build_color_mask(img: &RgbImage) -> Vec<u8> {
     let width = img.width() as usize;
     let height = img.height() as usize;
     let mut mask = vec![0u8; width * height];
@@ -182,7 +222,7 @@ fn create_color_mask(img: &RgbImage) -> Vec<u8> {
             let p = img.get_pixel(x as u32, y as u32);
             let max = p[0].max(p[1]).max(p[2]);
             let min = p[0].min(p[1]).min(p[2]);
-            if max - min >= SAT_THRESHOLD {
+            if max - min >= MIN_CHROMA && (MIN_VALUE..=MAX_VALUE).contains(&max) {
                 mask[y * width + x] = 1;
             }
         }
@@ -193,22 +233,21 @@ fn create_color_mask(img: &RgbImage) -> Vec<u8> {
 fn row_projection(mask: &[u8], width: usize, height: usize) -> Vec<f32> {
     (0..height)
         .map(|y| {
-            let count = (0..width)
-                .map(|x| mask[y * width + x] as usize)
-                .sum::<usize>();
+            let base = y * width;
+            let count = (0..width).map(|x| mask[base + x] as usize).sum::<usize>();
             count as f32 / width as f32
         })
         .collect()
 }
 
 fn col_projection(mask: &[u8], width: usize, top: usize, bottom: usize) -> Vec<f32> {
-    let height = bottom - top + 1;
+    let h = (bottom - top + 1) as f32;
     (0..width)
         .map(|x| {
             let count = (top..=bottom)
                 .map(|y| mask[y * width + x] as usize)
                 .sum::<usize>();
-            count as f32 / height as f32
+            count as f32 / h
         })
         .collect()
 }
@@ -221,13 +260,13 @@ fn local_row_projection(
     top: usize,
     bottom: usize,
 ) -> Vec<f32> {
-    let width = right - left + 1;
+    let width = (right - left + 1) as f32;
     (top..=bottom)
         .map(|y| {
             let count = (left..=right)
                 .map(|x| mask[y * image_width + x] as usize)
                 .sum::<usize>();
-            count as f32 / width as f32
+            count as f32 / width
         })
         .collect()
 }
@@ -235,77 +274,109 @@ fn local_row_projection(
 fn find_runs(
     values: &[f32],
     threshold: f32,
-    min_length: usize,
+    min_len: usize,
     merge_gap: usize,
 ) -> Vec<(usize, usize)> {
-    let mut runs = Vec::<(usize, usize)>::new();
-    let mut start: Option<usize> = None;
+    let mut raw = Vec::<(usize, usize)>::new();
+    let mut start = None;
 
     for (i, &value) in values.iter().enumerate() {
-        match (start, value >= threshold) {
-            (None, true) => start = Some(i),
-            (Some(s), false) => {
-                let end = i - 1;
-                if end - s + 1 >= min_length {
-                    runs.push((s, end));
-                }
-                start = None;
+        if value >= threshold {
+            if start.is_none() {
+                start = Some(i);
             }
-            _ => {}
+        } else if let Some(s) = start.take() {
+            let e = i - 1;
+            if e - s + 1 >= min_len {
+                raw.push((s, e));
+            }
         }
     }
     if let Some(s) = start {
-        let end = values.len() - 1;
-        if end - s + 1 >= min_length {
-            runs.push((s, end));
+        let e = values.len() - 1;
+        if e - s + 1 >= min_len {
+            raw.push((s, e));
         }
     }
 
-    if runs.is_empty() || merge_gap == 0 {
-        return runs;
+    if raw.is_empty() || merge_gap == 0 {
+        return raw;
     }
 
-    let mut merged = Vec::<(usize, usize)>::new();
-    let mut current = runs[0];
-    for &next in runs.iter().skip(1) {
+    let mut out = Vec::<(usize, usize)>::with_capacity(raw.len());
+    let mut current = raw[0];
+    for next in raw.into_iter().skip(1) {
         if next.0.saturating_sub(current.1 + 1) <= merge_gap {
             current.1 = next.1;
         } else {
-            merged.push(current);
+            out.push(current);
             current = next;
         }
     }
-    merged.push(current);
-    merged
+    out.push(current);
+    out
 }
 
-fn is_uniform(values: &[usize]) -> bool {
-    if values.is_empty() {
-        return false;
+fn gaps(runs: &[(usize, usize)]) -> Vec<usize> {
+    if runs.len() < 2 {
+        return Vec::new();
     }
-    let min = *values.iter().min().unwrap();
-    let max = *values.iter().max().unwrap();
-    if min == 0 {
-        return false;
-    }
-    (max - min) as f32 / (min as f32) < MAX_CELL_SPREAD
+    runs.windows(2)
+        .map(|w| w[1].0.saturating_sub(w[0].1 + 1))
+        .collect()
 }
 
-fn uniformity_score(values: &[usize]) -> f32 {
+fn coefficient_of_variation(values: &[usize]) -> f32 {
     if values.is_empty() {
-        return 0.0;
+        return f32::INFINITY;
     }
     let mean = values.iter().sum::<usize>() as f32 / values.len() as f32;
     if mean <= 0.0 {
-        return 0.0;
+        return f32::INFINITY;
     }
     let variance = values
         .iter()
-        .map(|v| (*v as f32 - mean).powi(2))
+        .map(|&v| (v as f32 - mean).powi(2))
         .sum::<f32>()
         / values.len() as f32;
-    let coefficient = variance.sqrt() / mean;
-    (1.0 - coefficient * 3.0).clamp(0.0, 1.0)
+    variance.sqrt() / mean
+}
+
+/// 每个格子内部（去掉 15% 边距）彩色像素的占比。
+fn cell_occupancy_score(
+    mask: &[u8],
+    image_width: usize,
+    x_runs: &[(usize, usize)],
+    y_runs: &[(usize, usize)],
+) -> f32 {
+    let mut total = 0usize;
+    let mut colored = 0usize;
+
+    for &(y0, y1) in y_runs {
+        for &(x0, x1) in x_runs {
+            let w = x1 - x0 + 1;
+            let h = y1 - y0 + 1;
+            let pad_x = ((w as f32) * 0.15).round() as usize;
+            let pad_y = ((h as f32) * 0.15).round() as usize;
+            let sx = x0 + pad_x.min(w / 3);
+            let ex = x1.saturating_sub(pad_x.min(w / 3));
+            let sy = y0 + pad_y.min(h / 3);
+            let ey = y1.saturating_sub(pad_y.min(h / 3));
+
+            for y in sy..=ey {
+                for x in sx..=ex {
+                    colored += mask[y * image_width + x] as usize;
+                    total += 1;
+                }
+            }
+        }
+    }
+
+    if total == 0 {
+        0.0
+    } else {
+        colored as f32 / total as f32
+    }
 }
 
 // ============================================================
@@ -320,7 +391,6 @@ fn detect_by_gradient(img: &RgbImage) -> Option<Grid> {
     let (h_start, h_end, h_cell) = find_board_and_cell_size(&h_profile, h)?;
     let (v_start, v_end, v_cell) = find_board_and_cell_size(&v_profile, w)?;
 
-    // 棋盘是正方形，两个方向格子大小应当一致。
     let cell = h_cell.min(v_cell);
     if (h_cell as i32 - v_cell as i32).abs() > cell as i32 / 4 {
         return None;
@@ -328,7 +398,7 @@ fn detect_by_gradient(img: &RgbImage) -> Option<Grid> {
 
     let n_h = ((h_end - h_start) as f64 / cell as f64).round() as usize;
     let n_w = ((v_end - v_start) as f64 / cell as f64).round() as usize;
-    if n_h != n_w || !(4..=16).contains(&n_h) {
+    if n_h != n_w || !(MIN_BOARD_SIZE..=MAX_BOARD_SIZE).contains(&n_h) {
         return None;
     }
     let size = n_h;
@@ -347,7 +417,6 @@ fn detect_by_gradient(img: &RgbImage) -> Option<Grid> {
         })
         .collect();
 
-    // 越界保护
     if x_runs.last()?.1 >= w as usize || y_runs.last()?.1 >= h as usize {
         return None;
     }
@@ -390,10 +459,8 @@ fn gradient_cols(img: &RgbImage) -> Vec<u64> {
         .collect()
 }
 
-/// 用梯度剖面的显著峰定位棋盘边界与格子大小。
-///
-/// 第一个峰和最后一个峰是棋盘与外边距的过渡（边界），中间的峰是内部网格线；
-/// 内部峰间距的中位数即格子大小。
+/// 用梯度剖面的显著峰定位棋盘边界与格子大小：首尾峰是棋盘与外边距的过渡，
+/// 中间峰是内部网格线，其间距中位数即格子大小。
 fn find_board_and_cell_size(profile: &[u64], dim: u32) -> Option<(u32, u32, u32)> {
     if profile.is_empty() || dim == 0 {
         return None;
@@ -446,12 +513,25 @@ fn find_board_and_cell_size(profile: &[u64], dim: u32) -> Option<(u32, u32, u32)
 // 采样、聚类、构建谜题
 // ============================================================
 
+#[derive(Clone, Copy)]
+struct Hsv {
+    h: f32,
+    s: f32,
+    v: f32,
+}
+
+#[derive(Clone, Copy)]
+struct Sample {
+    rgb: Rgb<u8>,
+    hsv: Hsv,
+}
+
 fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
     let n = grid.size;
-    let mut samples: Vec<Rgb<u8>> = Vec::with_capacity(n * n);
+    let mut samples: Vec<Sample> = Vec::with_capacity(n * n);
     for row in 0..n {
         for col in 0..n {
-            samples.push(sample_cell_color(
+            samples.push(sample_cell(
                 img,
                 grid.x_runs[col].0 as u32,
                 grid.y_runs[row].0 as u32,
@@ -461,11 +541,12 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
         }
     }
 
-    let (_, color_ids) = cluster_colors(&samples, COLOR_CLUSTER_DISTANCE);
+    let ids = cluster_colors(&samples, COLOR_DISTANCE_THRESHOLD);
 
     let mut region_cells: Vec<Vec<Cell>> = Vec::new();
-    let mut color_to_region: HashMap<usize, usize> = HashMap::new();
-    for (i, &cid) in color_ids.iter().enumerate() {
+    let mut color_to_region: std::collections::HashMap<usize, usize> =
+        std::collections::HashMap::new();
+    for (i, &cid) in ids.iter().enumerate() {
         let row = i / n;
         let col = i % n;
         let region = match color_to_region.get(&cid) {
@@ -490,83 +571,152 @@ fn build_puzzle(img: &RgbImage, grid: &Grid) -> Result<QueensPuzzle, String> {
     Ok(QueensPuzzle::new(region_cells))
 }
 
-/// 对格子中心 `SAMPLE_RATIO` 比例的区域取平均色，避开格子边缘和白线。
-fn sample_cell_color(img: &RgbImage, left: u32, top: u32, right: u32, bottom: u32) -> Rgb<u8> {
-    let width = (right - left + 1) as f32;
-    let height = (bottom - top + 1) as f32;
-    let sw = width * SAMPLE_RATIO;
-    let sh = height * SAMPLE_RATIO;
+/// 采样格子中心区域，忽略低色度像素（残留网格边、抗锯齿）。
+fn sample_cell(img: &RgbImage, left: u32, top: u32, right: u32, bottom: u32) -> Sample {
+    let w = (right - left + 1) as f32;
+    let h = (bottom - top + 1) as f32;
     let cx = (left + right) as f32 / 2.0;
     let cy = (top + bottom) as f32 / 2.0;
+    let half_w = w * SAMPLE_RATIO / 2.0;
+    let half_h = h * SAMPLE_RATIO / 2.0;
 
-    let l = ((cx - sw / 2.0).max(left as f32)) as u32;
-    let r = ((cx + sw / 2.0).min(right as f32)) as u32;
-    let t = ((cy - sh / 2.0).max(top as f32)) as u32;
-    let b = ((cy + sh / 2.0).min(bottom as f32)) as u32;
+    let x0 = (cx - half_w).max(left as f32) as u32;
+    let x1 = (cx + half_w).min(right as f32) as u32;
+    let y0 = (cy - half_h).max(top as f32) as u32;
+    let y1 = (cy + half_h).min(bottom as f32) as u32;
 
     let mut sr = 0u64;
     let mut sg = 0u64;
     let mut sb = 0u64;
     let mut count = 0u64;
-    for y in t..=b {
-        for x in l..=r {
+
+    for y in y0..=y1 {
+        for x in x0..=x1 {
             let p = img.get_pixel(x, y);
-            sr += p[0] as u64;
-            sg += p[1] as u64;
-            sb += p[2] as u64;
-            count += 1;
+            let max = p[0].max(p[1]).max(p[2]);
+            let min = p[0].min(p[1]).min(p[2]);
+            if max - min >= SAMPLE_MIN_CHROMA {
+                sr += p[0] as u64;
+                sg += p[1] as u64;
+                sb += p[2] as u64;
+                count += 1;
+            }
         }
     }
-    if count == 0 {
-        let p = img.get_pixel((left + right) / 2, (top + bottom) / 2);
-        return Rgb([p[0], p[1], p[2]]);
+
+    let rgb = match (
+        sr.checked_div(count),
+        sg.checked_div(count),
+        sb.checked_div(count),
+    ) {
+        (Some(r), Some(g), Some(b)) => Rgb([r as u8, g as u8, b as u8]),
+        // count == 0: 中心区域没有彩色像素，退回单点采样。
+        _ => {
+            let p = img.get_pixel((left + right) / 2, (top + bottom) / 2);
+            Rgb([p[0], p[1], p[2]])
+        }
+    };
+
+    Sample {
+        rgb,
+        hsv: rgb_to_hsv(rgb),
     }
-    Rgb([(sr / count) as u8, (sg / count) as u8, (sb / count) as u8])
 }
 
-/// 增量式颜色聚类：与已有中心距离在阈值内则归入该类并更新中心，否则新建一类。
-fn cluster_colors(samples: &[Rgb<u8>], threshold: f32) -> (Vec<Rgb<u8>>, Vec<usize>) {
-    let mut palette: Vec<Rgb<u8>> = Vec::new();
+fn rgb_to_hsv(rgb: Rgb<u8>) -> Hsv {
+    let r = rgb[0] as f32 / 255.0;
+    let g = rgb[1] as f32 / 255.0;
+    let b = rgb[2] as f32 / 255.0;
+
+    let max = r.max(g).max(b);
+    let min = r.min(g).min(b);
+    let d = max - min;
+
+    let h = if d < 1e-6 {
+        0.0
+    } else if (max - r).abs() < 1e-6 {
+        let mut h = 60.0 * ((g - b) / d);
+        if h < 0.0 {
+            h += 360.0;
+        }
+        h
+    } else if (max - g).abs() < 1e-6 {
+        60.0 * ((b - r) / d + 2.0)
+    } else {
+        60.0 * ((r - g) / d + 4.0)
+    };
+
+    let s = if max <= 1e-6 { 0.0 } else { d / max };
+    Hsv { h, s, v: max }
+}
+
+/// 色相为主的距离；色相是环形量，取最短弧。
+fn hsv_distance(a: Hsv, b: Hsv) -> f32 {
+    let mut dh = (a.h - b.h).abs();
+    if dh > 180.0 {
+        dh = 360.0 - dh;
+    }
+    let dh = dh / 180.0;
+    let ds = a.s - b.s;
+    let dv = a.v - b.v;
+    (dh * dh * 0.68 + ds * ds * 0.20 + dv * dv * 0.12).sqrt()
+}
+
+/// 增量式聚类；色相用向量平均避免 0°/360° 环绕问题。
+fn cluster_colors(samples: &[Sample], threshold: f32) -> Vec<usize> {
+    let mut centers: Vec<Sample> = Vec::new();
     let mut counts: Vec<usize> = Vec::new();
     let mut ids = Vec::with_capacity(samples.len());
 
     for &sample in samples {
         let mut best_id = None;
-        let mut best_distance = f32::MAX;
-        for (i, &center) in palette.iter().enumerate() {
-            let d = color_distance(sample, center);
-            if d < best_distance {
-                best_distance = d;
+        let mut best_dist = f32::INFINITY;
+        for (i, &center) in centers.iter().enumerate() {
+            let d = hsv_distance(sample.hsv, center.hsv);
+            if d < best_dist {
+                best_dist = d;
                 best_id = Some(i);
             }
         }
-        match best_id {
-            Some(id) if best_distance <= threshold => {
-                let n = counts[id] as f32;
-                let old = palette[id];
-                palette[id] = Rgb([
-                    ((old[0] as f32 * n + sample[0] as f32) / (n + 1.0)).round() as u8,
-                    ((old[1] as f32 * n + sample[1] as f32) / (n + 1.0)).round() as u8,
-                    ((old[2] as f32 * n + sample[2] as f32) / (n + 1.0)).round() as u8,
-                ]);
-                counts[id] += 1;
-                ids.push(id);
-            }
-            _ => {
-                ids.push(palette.len());
-                palette.push(sample);
-                counts.push(1);
-            }
-        }
-    }
-    (palette, ids)
-}
 
-fn color_distance(a: Rgb<u8>, b: Rgb<u8>) -> f32 {
-    let dr = a[0] as f32 - b[0] as f32;
-    let dg = a[1] as f32 - b[1] as f32;
-    let db = a[2] as f32 - b[2] as f32;
-    (dr * dr + dg * dg + db * db).sqrt()
+        let id = match best_id {
+            Some(i) if best_dist <= threshold => i,
+            _ => {
+                let i = centers.len();
+                centers.push(sample);
+                counts.push(0);
+                i
+            }
+        };
+        counts[id] += 1;
+        ids.push(id);
+
+        let n = counts[id] as f32;
+        let old = centers[id];
+
+        let old_h = old.hsv.h.to_radians();
+        let new_h = sample.hsv.h.to_radians();
+        let sum_x = old_h.cos() * (n - 1.0) + new_h.cos();
+        let sum_y = old_h.sin() * (n - 1.0) + new_h.sin();
+        let avg_h = sum_y.atan2(sum_x).to_degrees().rem_euclid(360.0);
+
+        let rgb = Rgb([
+            (((old.rgb[0] as f32) * (n - 1.0) + sample.rgb[0] as f32) / n).round() as u8,
+            (((old.rgb[1] as f32) * (n - 1.0) + sample.rgb[1] as f32) / n).round() as u8,
+            (((old.rgb[2] as f32) * (n - 1.0) + sample.rgb[2] as f32) / n).round() as u8,
+        ]);
+
+        centers[id] = Sample {
+            rgb,
+            hsv: Hsv {
+                h: avg_h,
+                s: ((old.hsv.s * (n - 1.0) + sample.hsv.s) / n).clamp(0.0, 1.0),
+                v: ((old.hsv.v * (n - 1.0) + sample.hsv.v) / n).clamp(0.0, 1.0),
+            },
+        };
+    }
+
+    ids
 }
 
 #[cfg(test)]
@@ -575,8 +725,6 @@ mod tests {
 
     #[test]
     fn analyze_cropped_screenshot_with_white_grid() {
-        // 裁剪好的 8×8 棋盘：白线 + 米色边距，格子偏浅（pastel）。
-        // 饱和度策略不适用，应回退到梯度策略。
         let path = std::path::PathBuf::from("../puzzles/screenshot-1.png");
         let puzzle = try_from_path(&path).expect("should parse cropped screenshot");
         assert_eq!(puzzle.n(), 8);
@@ -584,8 +732,6 @@ mod tests {
 
     #[test]
     fn analyze_full_screen_screenshot() {
-        // 完整手机截图：棋盘周围有关卡号、分数、图标、按钮等 UI。
-        // 饱和度策略应当直接命中，无需手动裁剪。
         let path = std::path::PathBuf::from("../puzzles/screenshot-full.png");
         let puzzle = try_from_path(&path).expect("should parse full-screen screenshot");
         assert_eq!(puzzle.n(), 8);
@@ -593,7 +739,6 @@ mod tests {
 
     #[test]
     fn analyze_full_screen_screenshot_10x10() {
-        // 完整手机截图的另一关：10×10 棋盘，验证尺寸检测在较大棋盘上也成立。
         let path = std::path::PathBuf::from("../puzzles/screenshot-10x10.png");
         let puzzle = try_from_path(&path).expect("should parse 10x10 full-screen screenshot");
         assert_eq!(puzzle.n(), 10);
