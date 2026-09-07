@@ -590,4 +590,12 @@ mod tests {
         let puzzle = try_from_path(&path).expect("should parse full-screen screenshot");
         assert_eq!(puzzle.n(), 8);
     }
+
+    #[test]
+    fn analyze_full_screen_screenshot_10x10() {
+        // 完整手机截图的另一关：10×10 棋盘，验证尺寸检测在较大棋盘上也成立。
+        let path = std::path::PathBuf::from("../puzzles/screenshot-10x10.png");
+        let puzzle = try_from_path(&path).expect("should parse 10x10 full-screen screenshot");
+        assert_eq!(puzzle.n(), 10);
+    }
 }
