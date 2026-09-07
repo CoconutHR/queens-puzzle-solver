@@ -4,12 +4,10 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![Rust 2024](https://img.shields.io/badge/Rust-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/)
 
-**[Try the web app →](https://daniel-jones-dev.github.io/queens-puzzle/)**
-
-A solver and generator for the **Queens** puzzle game (as made popular by LinkedIn).
+A solver for the **Queens** puzzle game (as made popular by LinkedIn).
 
 This tool can solve any puzzle: using logical deduction steps the way a person would to rate its difficulty, or using
-brute-force to verify validity and unique solutions. It can also generate new puzzles.
+brute-force to verify validity and unique solutions.
 
 In Queens, an *n×n* board is divided into *n* coloured regions. The goal is to place *n* queens so that:
 
@@ -24,11 +22,6 @@ In Queens, an *n×n* board is divided into *n* coloured regions. The goal is to 
 
 ## Features
 
-- **Web UI** with four pages:
-  - **Play** — solve puzzles with hints, undo, timer, and share-by-URL
-  - **Solve** — step through the solver's deduction chain with rule explanations
-  - **Editor** — paint custom region layouts with live uniqueness analysis and export
-  - **Generator** — run parallel background workers to generate and collect new puzzles
 - **Logical solver** that applies human-style techniques in order of increasing difficulty and
   rates the puzzle (Trivial / Easy / Medium / Hard) by the hardest technique it needed.
 - **Brute-force fallback** that finds all solutions for puzzles the logical solver can't crack.
@@ -52,29 +45,16 @@ cargo build --release
 
 The binary is at `target/release/queens-puzzle`. The examples below use `cargo run --` for convenience.
 
-### Web UI
-
-Requires the Rust toolchain, [wasm-pack](https://rustwasm.github.io/wasm-pack/installer/), and Node.js.
-
-```sh
-cd web
-npm install
-npm run dev   # builds WASM and starts the Vite dev server
-```
-
-For a production build: `npm run build` (output in `web/dist/`).
-
 ## Usage
 
 ```
 queens-puzzle [OPTIONS] <COMMAND>
 
 Commands:
-  solve     Solve a puzzle from a file and rate its difficulty
-  generate  Generate new puzzle(s), each with a unique solution
+  solve  Solve a puzzle from a file and rate its difficulty
 
 Options:
-  -v, --verbose...  Increase output verbosity (-v shows solver steps, -vv also shows generator steps)
+  -v, --verbose...  Increase output verbosity (-v for debug output, -vv for trace)
   -h, --help        Print help
   -V, --version     Print version
 ```
@@ -98,23 +78,6 @@ Show each deduction step-by-step:
 ```sh
 cargo run -- -v solve puzzles/linkedin_20240926.txt
 ```
-
-### Generate
-
-Generate a single 8×8 puzzle:
-
-```sh
-cargo run -- generate
-```
-
-Generate three 10×10 puzzles from a fixed seed (puzzle *i* uses `seed + i`):
-
-```sh
-cargo run -- generate --size 10 --count 3 --seed 42
-```
-
-Each generated puzzle is printed along with the difficulty rating it would receive. Add `-vv` to
-watch the generator grow and shrink regions as it searches.
 
 ## Puzzle file formats
 
@@ -164,18 +127,9 @@ Ideas for future work, roughly in priority order:
   - a rule for two or three candidate cells adjacent to each other crossing out their shared neighbours;
   - splitting the naked-set rule into more specific, easier-to-spot cases.
 - **Record the list of changes** the solver makes, to support a move history / undo and richer hints.
-- **Faster generation**: the current region-growing approach revisits the same set of cells from
-  multiple starting points; explore the tree by picking *sets of cells* to assign to a colour
-  instead — this also eliminates islands naturally (a cell surrounded by other regions can only
-  belong to the enclosing one), removing the need for the island-absorption special case.
 - **Performance**: memoise `queens()` rather than rescanning the board.
 - **Refactor** the core puzzle representation (grid, cell state, IO, change list) into its own module/crate.
 - **Fetch command** to download puzzles directly from the archive API.
-- **Built-in puzzle library** for the Play page (curated set shown on first load / "New puzzle").
-- **Generator progress reporting** for large boards (n≥9): a step-based `WasmGenerator` WASM type
-  would allow the UI to show real progress and support cancellation mid-search.
-- **Rules page discoverability and clarity**: make the rules page easier to find in the UI and add
-  image examples for each deduction technique.
 - **Screenshot importer**: recognise a pasted image of a Queens board and extract the region layout.
 
 ## License

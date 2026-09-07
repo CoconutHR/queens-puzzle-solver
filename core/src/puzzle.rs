@@ -471,7 +471,7 @@ mod tests {
     fn setup() {
         let puzzle = build_test_puzzle();
         assert_eq!(puzzle.n(), 4);
-        assert_eq!(puzzle.is_solved(), false);
+        assert!(!puzzle.is_solved());
         assert_eq!(puzzle.all_regions_iter().count(), 4);
     }
 
@@ -492,7 +492,7 @@ mod tests {
         .collect();
         assert_eq!(
             expected_cells,
-            puzzle.connected_cells(cell![0, 0]).into_iter().collect()
+            puzzle.connected_cells(cell![0, 0]).collect()
         );
 
         // Cell 3,0
@@ -510,7 +510,7 @@ mod tests {
         .collect();
         assert_eq!(
             expected_cells,
-            puzzle.connected_cells(cell![3, 0]).into_iter().collect()
+            puzzle.connected_cells(cell![3, 0]).collect()
         );
     }
 }

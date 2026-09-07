@@ -1,17 +1,17 @@
 [workspace]
-members = ["core", "wasm"]
+members = ["core"]
 resolver = "2"
 
 [package]
 name = "queens-puzzle"
 version = "0.2.0"
 edition = "2021"
-description = "A solver and generator for the LinkedIn Queens puzzle"
+description = "A solver for the LinkedIn Queens puzzle"
 authors = ["Daniel Jones <daniel@daniel-jones.dev>"]
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/daniel-jones-dev/queens-puzzle"
-keywords = ["puzzle", "solver", "generator", "queens", "cli"]
+keywords = ["puzzle", "solver", "queens", "cli"]
 categories = ["command-line-utilities", "games"]
 
 [[bin]]

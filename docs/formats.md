@@ -36,8 +36,7 @@ Implemented in `core/src/io/json.rs`.
 
 ## Canonical JSON format
 
-The interchange format used by the WASM API, the web UI (state persistence, URL sharing,
-import/export), and the CLI's `--json` flag.
+The canonical interchange format for a puzzle: its region layout plus optional metadata.
 
 ```json
 {

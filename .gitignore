@@ -2,6 +2,3 @@
 .idea/
 .junie/
 .DS_Store
-node_modules/
-dist/
-web/wasm-pkg/

@@ -1,7 +1,6 @@
 use clap::{Parser, Subcommand};
 use colored::*;
 use log::{info, LevelFilter};
-use queens_puzzle_core::generator::generate_puzzles;
 use queens_puzzle_core::grid::Cell;
 use queens_puzzle_core::puzzle::{region_color, QueensPuzzle, State};
 use queens_puzzle_core::solver::rule::RuleResult;
@@ -9,14 +8,14 @@ use queens_puzzle_core::{io, solver};
 use std::fmt::Write as _;
 use std::path::PathBuf;
 
-/// Solver and generator for the LinkedIn Queens puzzle.
+/// Solver for the LinkedIn Queens puzzle.
 #[derive(Parser, Debug)]
 #[command(version, about, long_about = None)]
 struct Cli {
     #[command(subcommand)]
     command: Command,
 
-    /// Increase output verbosity (-v shows solver steps, -vv also shows generator steps)
+    /// Increase output verbosity (-v for debug output, -vv for trace)
     #[arg(short, long, action = clap::ArgAction::Count, global = true)]
     verbose: u8,
 }
@@ -36,21 +35,6 @@ enum Command {
         #[arg(long)]
         id: Option<u32>,
     },
-
-    /// Generate new puzzle(s), each with a unique solution
-    Generate {
-        /// Board size; generates an n x n board
-        #[arg(short = 'n', long, default_value_t = 8)]
-        size: usize,
-
-        /// Number of puzzles to generate
-        #[arg(short, long, default_value_t = 1)]
-        count: usize,
-
-        /// Base RNG seed; puzzle i uses seed + i
-        #[arg(short, long, default_value_t = 0)]
-        seed: u64,
-    },
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -65,15 +49,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 io::text::read_puzzle_text(file)
             };
             solve_puzzle(&puzzle);
-        }
-        Command::Generate { size, count, seed } => {
-            for mut puzzle in generate_puzzles(size, count, seed) {
-                info!("{}", format_board(&puzzle));
-                match solver::rate_puzzle(&mut puzzle) {
-                    Some(difficulty) => info!("Difficulty: {}\n", difficulty),
-                    None => info!("Difficulty: unrated (no unique solution)\n"),
-                }
-            }
         }
     }
 

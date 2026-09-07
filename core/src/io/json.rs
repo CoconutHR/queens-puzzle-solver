@@ -2,7 +2,7 @@ use crate::grid::Cell;
 use crate::puzzle::{QueensPuzzle, State};
 use serde::{Deserialize, Serialize};
 
-/// The canonical puzzle interchange format used by the web UI, WASM API, and URL sharing.
+/// The canonical puzzle interchange format: region layout plus optional metadata.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PuzzleJson {
     /// Human-readable puzzle name; omitted by the solver/generator output

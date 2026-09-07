@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented here.
 
+## [Unreleased]
+
+### Removed
+- **Web UI** (`web/`): Play, Solve, Editor, and Generator pages, Playwright tests, and GitHub Pages deployment
+- **WASM bindings** (`wasm/` crate) — its only consumer was the web UI
+- **CLI `generate` subcommand**; the CLI is now a pure solver
+
 ## [0.2.0] - 2026-07-09
 
 ### Added
