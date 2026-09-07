@@ -324,10 +324,6 @@ impl QueensPuzzle {
         self.board.cells_diagonally_adjacent(cell)
     }
 
-    pub fn cells_cardinally_adjacent(&self, cell: Cell) -> impl Iterator<Item = Cell> + '_ {
-        self.board.cells_cardinally_adjacent(cell)
-    }
-
     pub fn connected_cells(&self, cell: Cell) -> impl Iterator<Item = Cell> + '_ {
         self.cells_in_same_col(cell)
             .chain(self.cells_in_same_row(cell))

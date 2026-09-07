@@ -1,66 +1,20 @@
 use crate::grid::Cell;
 use crate::puzzle::{QueensPuzzle, State};
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 
 /// The canonical puzzle interchange format: region layout plus optional metadata.
-#[derive(Serialize, Deserialize, Debug)]
+#[derive(Deserialize, Debug)]
 pub struct PuzzleJson {
-    /// Human-readable puzzle name; omitted by the solver output
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Human-readable puzzle name; ignored by the solver
     pub name: Option<String>,
-    /// Attribution; omitted by the solver output
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// Attribution; ignored by the solver
     pub source: Option<String>,
-    /// ISO 8601 date the puzzle was created or generated (YYYY-MM-DD); omitted by solver output
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// ISO 8601 date the puzzle was created (YYYY-MM-DD); ignored by the solver
     pub date: Option<String>,
     /// `regions[row][col]` — region index (0-based) or `null` for an unassigned cell
     pub regions: Vec<Vec<Option<u8>>>,
-    /// `states[row][col]` — 0 = Unknown, 1 = Queen, 2 = Empty; omitted when all Unknown
-    #[serde(skip_serializing_if = "Option::is_none")]
+    /// `states[row][col]` — 0 = Unknown, 1 = Queen, 2 = Empty; absent when all Unknown
     pub states: Option<Vec<Vec<u8>>>,
-}
-
-impl PuzzleJson {
-    pub fn from_puzzle(puzzle: &QueensPuzzle) -> Self {
-        let n = puzzle.n();
-        let regions: Vec<Vec<Option<u8>>> = (0..n)
-            .map(|row| {
-                (0..n)
-                    .map(|col| puzzle.cell_region(Cell { row, col }))
-                    .collect()
-            })
-            .collect();
-
-        let all_unknown = (0..n)
-            .all(|row| (0..n).all(|col| puzzle.cell_state(Cell { row, col }) == State::Unknown));
-
-        let states = if all_unknown {
-            None
-        } else {
-            Some(
-                (0..n)
-                    .map(|row| {
-                        (0..n)
-                            .map(|col| match puzzle.cell_state(Cell { row, col }) {
-                                State::Unknown => 0,
-                                State::Queen => 1,
-                                State::Empty => 2,
-                            })
-                            .collect()
-                    })
-                    .collect(),
-            )
-        };
-
-        PuzzleJson {
-            name: None,
-            source: None,
-            date: None,
-            regions,
-            states,
-        }
-    }
 }
 
 pub fn parse(input: &str) -> Result<QueensPuzzle, String> {
@@ -159,9 +113,4 @@ pub fn parse(input: &str) -> Result<QueensPuzzle, String> {
     }
 
     Ok(puzzle)
-}
-
-pub fn serialize(puzzle: &QueensPuzzle) -> String {
-    let pj = PuzzleJson::from_puzzle(puzzle);
-    serde_json::to_string(&pj).expect("serialization cannot fail")
 }

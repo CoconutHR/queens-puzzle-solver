@@ -74,17 +74,6 @@ fn make_rules() -> Vec<(Box<dyn Rule>, Difficulty)> {
     ]
 }
 
-/// Returns the next logical deduction without mutating the puzzle, or `None` if no step is found.
-pub fn next_hint(puzzle: &QueensPuzzle) -> Option<rule::RuleResult> {
-    let rules = make_rules();
-    for (rule, _) in &rules {
-        if let Some(result) = rule.check(puzzle) {
-            return Some(result);
-        }
-    }
-    None
-}
-
 /// Rates the puzzle difficulty, falling back to brute force if logic alone cannot solve it.
 /// Returns `Some(RequiresGuessing)` when the puzzle has a unique solution but requires guessing.
 /// Returns `None` only when the puzzle has no solution or multiple solutions.

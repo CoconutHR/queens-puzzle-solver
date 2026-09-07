@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 680 316" width="680" height="316" role="img">
+  <title>Queens 求解器链路</title>
+  <desc>谜题文件经 IO 解析为 QueensPuzzle，交由逻辑求解或暴力回溯求解并评级，最后由 CLI 渲染棋盘与难度。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M2 1L8 5L2 9" fill="none" stroke="#185FA5" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>
+    </marker>
+  </defs>
+  <g font-family="system-ui, -apple-system, Segoe UI, PingFang SC, Microsoft YaHei, sans-serif">
+
+    <rect x="40" y="40" width="176" height="56" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="128" y="58" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#9FE1CB">谜题输入</text>
+    <text x="128" y="76" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5DCAA5">文本网格 · 归档 JSON</text>
+
+    <rect x="252" y="40" width="176" height="56" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="340" y="58" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#9FE1CB">IO 解析</text>
+    <text x="340" y="76" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5DCAA5">io::text · archived</text>
+
+    <rect x="464" y="40" width="176" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+    <text x="552" y="58" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#B5D4F4">QueensPuzzle</text>
+    <text x="552" y="76" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#85B7EB">网格 · 区域 · 状态</text>
+
+    <path d="M220 68 H248" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M432 68 H460" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M552 96 V118 H128 V134" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <rect x="40" y="140" width="176" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+    <text x="128" y="158" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#B5D4F4">逻辑求解</text>
+    <text x="128" y="176" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#85B7EB">5 类规则 · 14 条实例</text>
+
+    <rect x="252" y="140" width="176" height="56" rx="8" fill="#0C447C" stroke="#85B7EB" stroke-width="0.5"/>
+    <text x="340" y="158" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#B5D4F4">暴力回溯</text>
+    <text x="340" y="176" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#85B7EB">逻辑失效时兜底</text>
+
+    <rect x="464" y="140" width="176" height="56" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="552" y="158" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#9FE1CB">难度评级</text>
+    <text x="552" y="176" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5DCAA5">Trivial → 需猜测</text>
+
+    <path d="M220 168 H248" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M432 168 H460" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+    <path d="M552 196 V218 H340 V234" fill="none" stroke="#185FA5" stroke-width="1.5" marker-end="url(#arrow)"/>
+
+    <rect x="252" y="240" width="176" height="56" rx="8" fill="#085041" stroke="#5DCAA5" stroke-width="0.5"/>
+    <text x="340" y="258" text-anchor="middle" dominant-baseline="central" font-size="14" font-weight="500" fill="#9FE1CB">CLI 输出</text>
+    <text x="340" y="276" text-anchor="middle" dominant-baseline="central" font-size="12" fill="#5DCAA5">棋盘 + 难度</text>
+
+  </g>
+</svg>

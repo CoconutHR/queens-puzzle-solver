@@ -1,50 +1,51 @@
-# Queens puzzle
+# Queens 求解器
 
-[![CI](https://github.com/daniel-jones-dev/queens-puzzle/actions/workflows/ci.yml/badge.svg)](https://github.com/daniel-jones-dev/queens-puzzle/actions/workflows/ci.yml)
+[![CI](https://github.com/CoconutHR/queens-puzzle-solver/actions/workflows/ci.yml/badge.svg)](https://github.com/CoconutHR/queens-puzzle-solver/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Rust 2024](https://img.shields.io/badge/Rust-2024-orange.svg)](https://doc.rust-lang.org/edition-guide/rust-2024/)
 
-A solver for the **Queens** puzzle game (as made popular by LinkedIn).
+一个面向 **Queens**（LinkedIn 上的皇后谜题）的命令行求解器。
 
-This tool can solve any puzzle: using logical deduction steps the way a person would to rate its difficulty, or using
-brute-force to verify validity and unique solutions.
+程序采用人类解题的思路：先用逻辑推导一步步推进，据此给谜题评定难度；逻辑走不通时改用暴力搜索兜底，
+验证谜题是否有解、是否唯一。
 
-In Queens, an *n×n* board is divided into *n* coloured regions. The goal is to place *n* queens so that:
+在 Queens 中，一个 *n×n* 的棋盘被划分为 *n* 个彩色区域，目标是放下 *n* 个皇后，使得：
 
-- exactly one queen sits in each **row**, each **column**, and each coloured **region**, and
-- no two queens are placed **next to each other** (including diagonally).
+- 每一行、每一列、每一个彩色区域都**恰好有一个**皇后；
+- 任意两个皇后**互不相邻**（含斜向相邻）。
 
 <p align="center">
-  <img src="docs/example_game.png" alt="A 7×7 Queens puzzle part-way through being solved" width="380">
+  <img src="docs/example_game.png" alt="一个 7×7 Queens 谜题的求解中盘面" width="380">
 </p>
 
-<p align="center"><em>A puzzle mid-solve: crowns mark placed queens and an <code>x</code> marks a cell ruled out.</em></p>
+<p align="center"><em>求解中的盘面：皇冠表示已放下的皇后，<code>x</code> 表示被排除的格子。</em></p>
 
-## Features
+## 处理链路
 
-- **Logical solver** that applies human-style techniques in order of increasing difficulty and
-  rates the puzzle (Trivial / Easy / Medium / Hard) by the hardest technique it needed.
-- **Brute-force fallback** that finds all solutions for puzzles the logical solver can't crack.
-- **CLI** with colourful terminal output and step-by-step explanations.
-- Reads puzzles from a simple **text format** or from the **archived JSON** of past LinkedIn puzzles.
+![求解链路](docs/pipeline.svg)
 
-> Terminal boards are rendered with true-colour region backgrounds; a terminal with 24-bit colour support gives the best results.
+## 功能
 
-## Building
+- **逻辑求解器**：按难度递增应用人类式解题技巧，并按所用最难的技巧给出难度评级
+  （Trivial / Easy / Medium / Hard）。
+- **暴力兜底**：逻辑无法推进时枚举全部解，用于判定无解或多解。
+- **命令行界面**：真彩色终端棋盘渲染，逐步给出解题结果。
+- 支持从简洁的**文本格式**或 LinkedIn 谜题的**归档 JSON** 中读取题目。
 
-### CLI
+> 终端棋盘使用真彩色区域背景渲染，建议使用支持 24 位色的终端查看。
 
-Requires a [Rust toolchain](https://www.rust-lang.org/tools/install).
+## 构建
+
+需要 [Rust 工具链](https://www.rust-lang.org/tools/install)。
 
 ```sh
-git clone https://github.com/daniel-jones-dev/queens-puzzle
+git clone https://github.com/CoconutHR/queens-puzzle-solver
 cd queens-puzzle
 cargo build --release
 ```
 
-The binary is at `target/release/queens-puzzle`. The examples below use `cargo run --` for convenience.
+可执行文件位于 `target/release/queens-puzzle`。下文的示例统一使用 `cargo run --` 调用。
 
-## Usage
+## 用法
 
 ```
 queens-puzzle [OPTIONS] <COMMAND>
@@ -53,77 +54,66 @@ Commands:
   solve  Solve a puzzle from a file and rate its difficulty
 
 Options:
-  -v, --verbose...  Increase output verbosity (-v for debug output, -vv for trace)
   -h, --help        Print help
   -V, --version     Print version
 ```
 
-### Solve
+### 求解
 
-Solve a puzzle from a text file:
+求解文本格式的谜题：
 
 ```sh
 cargo run -- solve puzzles/linkedin_20240926.txt
 ```
 
-Solve a puzzle from the archived JSON (defaults to the lowest puzzle id; use `--id` to pick one):
+求解归档 JSON 中的谜题（默认取文件中 id 最小的那个，用 `--id` 指定其它题目）：
 
 ```sh
 cargo run -- solve --json puzzles/linkedinPuzzles.json --id 353
 ```
 
-Show each deduction step-by-step:
+输出依次为：原始盘面、解完的盘面、难度评级。
 
-```sh
-cargo run -- -v solve puzzles/linkedin_20240926.txt
-```
+## 谜题文件格式
 
-## Puzzle file formats
+完整的格式规范见 [docs/formats.md](docs/formats.md)，涵盖文本格式、归档 JSON 与 canonical JSON。
 
-See [docs/formats.md](docs/formats.md) for the full specification of all supported formats (text,
-archived JSON, and canonical JSON).
+## 求解原理
 
-## How it works
+求解器反复扫描棋盘，寻找当前可应用的**最简单**技巧，应用后从头重新扫描，直到解出或再无技巧可用。
+每一步都能给出人类可读的解释。难度即解题过程中所需的最难技巧：
 
-### Solver
+| 难度 | 技巧 | 思路 |
+|------|------|------|
+| Trivial | Mark queen | 某行、列或区域只剩一个格子时，该格必为皇后。 |
+| Trivial | Mark empty | 与皇后同行、同列、同区域或斜向相邻的格子必为空。 |
+| Easy | Pointers | 若某区域剩余格子都落在同一行或列，则该行列其余格子必为空。 |
+| Medium / Hard | Naked set | 某区块中 *N* 个格子必然包含皇后，可排除同区块其它格子。 |
+| Hard | Hidden set | *N* 个区域若只落在 *N* 行或列内，则这些行列被它们独占，其余格子为空。 |
 
-The solver repeatedly scans the board for the easiest applicable technique, applies it, and starts
-over until the puzzle is solved or no technique applies. Each technique reports a human-readable
-explanation (shown with `-v`). The difficulty is the hardest technique that was required:
+若逻辑卡住，**暴力求解器**会按列递归放置皇后（尊重已推导出的皇后），并报告找到的解。
+唯一解但无法用逻辑推出时，评级为 `Requires guessing`；无解或多解时不给出评级。
 
-| Difficulty | Technique | Idea |
-|------------|-----------|------|
-| Trivial | Mark queen | If a row, column, or region has only one cell left, it must be a queen. |
-| Trivial | Mark empty | Every cell connected to a queen (same row, column, region, or diagonally adjacent) must be empty. |
-| Easy | Pointers | If a region's remaining cells all lie in one row/column, the rest of that row/column must be empty. |
-| Medium / Hard | Naked set | *N* cells in a block that between them must hold a queen force other cells empty. |
-| Hard | Hidden set | *N* regions confined to *N* rows/columns must hold those queens, emptying the rest of those rows/columns. |
+## 谜题存档
 
-If logic gets stuck, the **brute-force** solver places one queen per column recursively (respecting
-any queens already deduced) and reports the solution(s) it finds.
+[playqueensgame.com](https://www.playqueensgame.com) 收录了 LinkedIn 上出现过的全部谜题，
+可按 `https://www.playqueensgame.com/api/daily?date=YYYY-MM-DD` 获取单日题目。
+（`https://queensstorage.blob.core.windows.net/puzzles/linkedinPuzzles.json` 是另一个来源，但不完整。）
 
-## Puzzle archive
+## 后续方向
 
-[playqueensgame.com](https://www.playqueensgame.com) has an archive of every puzzle that has
-appeared on LinkedIn. Individual puzzles can be fetched from
-`https://www.playqueensgame.com/api/daily?date=YYYY-MM-DD`.
-(`https://queensstorage.blob.core.windows.net/puzzles/linkedinPuzzles.json` is another, incomplete,
-source.)
+按大致优先级排列：
 
-## Next steps
+- **更多的解题技巧**，以减少对暴力搜索的依赖：
+  - 区域剩余未知格全部落在同一行或列时的规则；
+  - 相邻的两个或三个候选格共同排除其公共邻居的规则；
+  - 把 naked set 拆分为更具体、更易识别的几种情形。
+- **记录求解器的变更列表**，以支持走子历史 / 撤销和更丰富的提示。
+- **性能**：缓存 `queens()` 的结果，避免反复扫描棋盘。
+- **重构**：把核心棋盘表示（网格、格子状态、IO、变更列表）拆成独立模块或 crate。
+- **fetch 命令**：直接从存档 API 下载谜题。
+- **截图导入**：识别粘贴的棋盘截图并提取区域布局。
 
-Ideas for future work, roughly in priority order:
+## 许可证
 
-- **More solving techniques**, to reduce reliance on brute force:
-  - a rule for when a region's remaining unknowns all lie in a single row or column;
-  - a rule for two or three candidate cells adjacent to each other crossing out their shared neighbours;
-  - splitting the naked-set rule into more specific, easier-to-spot cases.
-- **Record the list of changes** the solver makes, to support a move history / undo and richer hints.
-- **Performance**: memoise `queens()` rather than rescanning the board.
-- **Refactor** the core puzzle representation (grid, cell state, IO, change list) into its own module/crate.
-- **Fetch command** to download puzzles directly from the archive API.
-- **Screenshot importer**: recognise a pasted image of a Queens board and extract the region layout.
-
-## License
-
-Released under the [MIT License](LICENSE).
+基于 [MIT License](LICENSE) 发布。

@@ -1,9 +1,7 @@
 use clap::{Parser, Subcommand};
 use colored::*;
-use log::{info, LevelFilter};
 use queens_puzzle_core::grid::Cell;
 use queens_puzzle_core::puzzle::{region_color, QueensPuzzle, State};
-use queens_puzzle_core::solver::rule::RuleResult;
 use queens_puzzle_core::{io, solver};
 use std::fmt::Write as _;
 use std::path::PathBuf;
@@ -14,10 +12,6 @@ use std::path::PathBuf;
 struct Cli {
     #[command(subcommand)]
     command: Command,
-
-    /// Increase output verbosity (-v for debug output, -vv for trace)
-    #[arg(short, long, action = clap::ArgAction::Count, global = true)]
-    verbose: u8,
 }
 
 #[derive(Subcommand, Debug)]
@@ -39,7 +33,6 @@ enum Command {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
-    init_logging(cli.verbose);
 
     match cli.command {
         Command::Solve { file, json, id } => {
@@ -55,48 +48,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-fn init_logging(verbosity: u8) {
-    let level = match verbosity {
-        0 => LevelFilter::Info,
-        1 => LevelFilter::Debug,
-        _ => LevelFilter::Trace,
-    };
-
-    env_logger::Builder::new()
-        .filter_level(level)
-        .target(env_logger::Target::Stdout)
-        .format(|buf, record| {
-            use std::io::Write;
-            writeln!(buf, "{}", record.args())
-        })
-        .init();
-}
-
 fn solve_puzzle(puzzle: &QueensPuzzle) {
-    info!("{}", format_board(puzzle));
+    println!("{}", format_board(puzzle));
 
     let mut working = puzzle.clone();
     let difficulty = solver::rate_puzzle(&mut working);
 
-    info!("{}", format_board(&working));
+    println!("{}", format_board(&working));
     match difficulty {
-        Some(d) => info!("Difficulty: {}", d),
-        None => info!("Difficulty: unrated (no unique solution)"),
+        Some(d) => println!("Difficulty: {}", d),
+        None => println!("Difficulty: unrated (no unique solution)"),
     }
 }
 
 fn format_board(puzzle: &QueensPuzzle) -> String {
-    format_board_result(puzzle, &None)
-}
-
-fn format_board_result(puzzle: &QueensPuzzle, rule_result: &Option<RuleResult>) -> String {
     let n = puzzle.n();
     let mut out = String::new();
 
     for row in 0..n {
         for col in 0..n {
             let cell = Cell { row, col };
-            let mut cell_text = match puzzle[cell] {
+            let cell_text = match puzzle[cell] {
                 State::Queen => " ♛ ",
                 State::Empty => " x ",
                 _ => "   ",
@@ -106,30 +78,13 @@ fn format_board_result(puzzle: &QueensPuzzle, rule_result: &Option<RuleResult>) 
                 .all_regions_iter()
                 .position(|(region, _)| region.contains(&cell));
 
-            cell_text = match rule_result {
-                Some(rule_result) => {
-                    if rule_result.changes.iter().any(|(c, _)| *c == cell) {
-                        cell_text.bright_green()
-                    } else if rule_result.involved.contains(&cell) {
-                        cell_text.underline()
-                    } else {
-                        cell_text
-                    }
-                }
-                None => cell_text,
-            };
-
-            cell_text = match region_index {
+            let cell_text = match region_index {
                 Some(index) => colorize_region(cell_text, index),
                 None => cell_text,
             };
             write!(out, "{} ", cell_text).unwrap();
         }
         writeln!(out).unwrap();
-    }
-
-    if let Some(result) = rule_result {
-        write!(out, "{}", result.description).unwrap();
     }
 
     out

@@ -4,13 +4,22 @@ All notable changes to this project will be documented here.
 
 ## [Unreleased]
 
-### Removed
-- **Web UI** (`web/`): Play, Solve, Editor, and Generator pages, Playwright tests, and GitHub Pages deployment
-- **WASM bindings** (`wasm/` crate) — its only consumer was the web UI
-- **CLI `generate` subcommand**; the CLI is now a pure solver
-- **Puzzle generator** (`core/src/generator.rs`, `shuffle_queens`): the project is solver-only. Also
-  drops the generator-only `assign_cell_region`/`unassign_cell_region` puzzle API and the now-unused
-  `rand` and `log` dependencies of `queens-puzzle-core`
+> 说明：本轮起新增的变更记录使用中文，历史版本记录保留原文。
+
+### 移除
+- **Web UI**（`web/`）：Play / Solve / Editor / Generator 四个页面、Playwright 测试与 GitHub Pages 部署
+- **WASM 绑定**（`wasm/` crate）—— 唯一的使用方就是 Web UI
+- **CLI `generate` 子命令**，CLI 变为纯求解器
+- **谜题生成器**（`core/src/generator.rs`、`shuffle_queens`）：项目只保留求解能力。同时移除仅供生成器
+  使用的 `assign_cell_region` / `unassign_cell_region`，以及随之不再需要的 `rand`、`log` 依赖
+- **`.claude/` 目录**（上游作者的 AI 记忆文件）
+- **失去调用方的残留接口**：`solver::next_hint`、`io::json::serialize` 与 `PuzzleJson::from_puzzle`
+  （canonical JSON 导出）、`QueensPuzzle::cells_cardinally_adjacent`、CLI 中永不触发的规则高亮渲染分支
+- **CLI 的 `-v/-vv` 与 `env_logger`**：生成器移除后全仓库已无日志输出点，输出统一改为直接打印
+
+### 文档
+- README、CLAUDE.md、docs/formats.md 改为中文说明
+- 新增 `docs/pipeline.svg` 处理链路图，并在 README 中引用
 
 ## [0.2.0] - 2026-07-09
 
