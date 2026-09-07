@@ -32,11 +32,24 @@ class AnalyzeError(RuntimeError):
     """解析失败。保留退出码与 stderr 便于排查，而不是让进程崩掉。"""
 
 
-def _run(args: list[str], *, input_data: bytes | None, binary: str, timeout: float) -> dict[str, Any]:
+def _run(
+    args: list[str],
+    *,
+    input_data: bytes | None,
+    binary: str,
+    timeout: float,
+    crop: tuple[int, int, int, int] | None,
+) -> dict[str, Any]:
     """执行二进制并把 stdout 解析为 JSON。"""
+    cmd = [binary, "analyze"]
+    if crop is not None:
+        if len(crop) != 4:
+            raise AnalyzeError(f"crop 需要 4 个值 (left, top, right, bottom)，收到 {crop!r}")
+        cmd += ["--crop", ",".join(str(int(v)) for v in crop)]
+    cmd += args
     try:
         proc = subprocess.run(
-            [binary, "analyze", *args],
+            cmd,
             input=input_data,
             capture_output=True,
             timeout=timeout,
@@ -60,6 +73,7 @@ def analyze_screenshot(
     data: bytes,
     binary: str = DEFAULT_BINARY,
     timeout: float = 30.0,
+    crop: tuple[int, int, int, int] | None = None,
 ) -> dict[str, Any]:
     """把图片字节传给二进制（经 stdin，不落盘），返回解析结果。
 
@@ -67,6 +81,8 @@ def analyze_screenshot(
         data: 图片的原始字节（PNG / JPEG / WebP）。
         binary: 二进制路径，默认从 PATH 查找。
         timeout: 超时秒数。
+        crop: 可选的 (left, top, right, bottom) 提示框，只在框内搜索棋盘。
+              不需要精确等于棋盘，检测仍在框内进行。返回的坐标始终是原图坐标。
 
     Returns:
         含 size / board / regions / cells / solution / difficulty / palette 的字典。
@@ -74,13 +90,14 @@ def analyze_screenshot(
     Raises:
         AnalyzeError: 二进制返回非零退出码或超时。
     """
-    return _run(["-"], input_data=data, binary=binary, timeout=timeout)
+    return _run(["-"], input_data=data, binary=binary, timeout=timeout, crop=crop)
 
 
 def analyze_file(
     path: str | Path,
     binary: str = DEFAULT_BINARY,
     timeout: float = 30.0,
+    crop: tuple[int, int, int, int] | None = None,
 ) -> dict[str, Any]:
     """把图片路径直接传给二进制（离线使用，不经 stdin），返回解析结果。
 
@@ -90,6 +107,7 @@ def analyze_file(
         path: 图片文件路径。
         binary: 二进制路径，默认从 PATH 查找。
         timeout: 超时秒数。
+        crop: 可选的 (left, top, right, bottom) 提示框，只在框内搜索棋盘。
 
     Raises:
         AnalyzeError: 二进制返回非零退出码或超时，或文件不存在。
@@ -97,7 +115,7 @@ def analyze_file(
     p = Path(path)
     if not p.is_file():
         raise AnalyzeError(f"文件不存在: {p}")
-    return _run([str(p)], input_data=None, binary=binary, timeout=timeout)
+    return _run([str(p)], input_data=None, binary=binary, timeout=timeout, crop=crop)
 
 
 def queen_pixels(result: dict[str, Any]) -> list[tuple[int, int]]:
@@ -107,20 +125,34 @@ def queen_pixels(result: dict[str, Any]) -> list[tuple[int, int]]:
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    crop = None
+    if "--crop" in args:
+        i = args.index("--crop")
+        try:
+            spec = args[i + 1]
+            crop = tuple(int(v) for v in spec.split(","))
+            if len(crop) != 4:
+                raise ValueError
+            del args[i : i + 2]
+        except (IndexError, ValueError):
+            print("--crop 需要形如 0,700,1178,1900 的四个数字", file=sys.stderr)
+            return 2
+
+    if len(args) != 1:
         print(__doc__)
         return 2
 
-    path = Path(sys.argv[1])
+    path = Path(args[0])
     if not path.is_file():
         print(f"文件不存在: {path}", file=sys.stderr)
         return 2
 
-    # 用路径模式（离线）。若要演示字节模式，改成 analyze_screenshot(path.read_bytes())
-    result = analyze_file(path)
+    # 用路径模式（离线）。若要演示字节模式，改成 analyze_screenshot(path.read_bytes(), crop=crop)
+    result = analyze_file(path, crop=crop)
 
     print(f"棋盘: {result['size']}x{result['size']}  "
-          f"区域: {result['board']}")
+          f"区域: {result['board']}" + (f"  (crop={crop})" if crop else ""))
     print(f"难度: {result['difficulty']}")
     print(f"解（行列）: {result['solution']}")
     print(f"解（像素中心，可直接点击）: {queen_pixels(result)}")

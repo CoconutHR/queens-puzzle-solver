@@ -555,6 +555,85 @@ pub struct BoardGeometry {
     pub regions: Vec<Vec<usize>>,
 }
 
+/// A rectangular region of interest, in original-image coordinates.
+///
+/// Used when the caller already knows roughly where the board is (e.g. a fixed
+/// app layout). The region does **not** have to be exactly the board — the
+/// detector still runs inside it, so an approximate box is fine.
+#[derive(Debug, Clone, Copy)]
+pub struct Crop {
+    pub left: u32,
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+}
+
+/// Like [`analyze_detailed`], but restricted to `crop` when given.
+///
+/// Coordinates in the returned geometry are always in **original-image** space,
+/// so cell centers can be used for clicks without any manual offset arithmetic.
+pub fn analyze_cropped(
+    img: &RgbImage,
+    crop: Option<Crop>,
+) -> Result<(QueensPuzzle, BoardGeometry), String> {
+    let crop = match crop {
+        None => return analyze_detailed(img),
+        Some(c) => c,
+    };
+
+    let (w, h) = img.dimensions();
+    if w == 0 || h == 0 {
+        return Err("image is empty".to_string());
+    }
+
+    // Clamp to the image so a slightly out-of-range box still works.
+    let left = crop.left.min(w - 1);
+    let right = crop.right.min(w - 1);
+    let top = crop.top.min(h - 1);
+    let bottom = crop.bottom.min(h - 1);
+
+    if right <= left || bottom <= top {
+        return Err(format!(
+            "crop region is empty or invalid: ({left}, {top})..({right}, {bottom})"
+        ));
+    }
+
+    let sub = crop_image(img, left, top, right, bottom);
+
+    // The crop is only a hint. If nothing is found inside it, fall back to the
+    // whole image rather than failing — a stale or slightly-off hint should not
+    // break the call.
+    let (puzzle, mut geo) = match analyze_detailed(&sub) {
+        Ok(found) => found,
+        Err(_) => return analyze_detailed(img),
+    };
+
+    // Translate geometry back into original-image coordinates.
+    geo.left += left;
+    geo.right += left;
+    geo.top += top;
+    geo.bottom += top;
+    for row in geo.cell_centers.iter_mut() {
+        for (x, y) in row.iter_mut() {
+            *x += left;
+            *y += top;
+        }
+    }
+    Ok((puzzle, geo))
+}
+
+fn crop_image(img: &RgbImage, left: u32, top: u32, right: u32, bottom: u32) -> RgbImage {
+    let width = right - left + 1;
+    let height = bottom - top + 1;
+    let mut out = RgbImage::new(width, height);
+    for y in 0..height {
+        for x in 0..width {
+            out.put_pixel(x, y, *img.get_pixel(left + x, top + y));
+        }
+    }
+    out
+}
+
 /// Like [`analyze`], but also returns the pixel geometry of the detected board.
 pub fn analyze_detailed(img: &RgbImage) -> Result<(QueensPuzzle, BoardGeometry), String> {
     let (w, h) = img.dimensions();

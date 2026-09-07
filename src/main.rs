@@ -40,6 +40,16 @@ enum Command {
     Analyze {
         /// Path to the image. Omit (or pass "-") to read image bytes from stdin.
         file: Option<PathBuf>,
+
+        /// Only look inside this box, as "left,top,right,bottom" in image pixels.
+        ///
+        /// Useful when the app layout is fixed: it narrows the search and makes
+        /// detection deterministic. The box does NOT need to match the board
+        /// exactly — detection still runs inside it. Out-of-range values are
+        /// clamped to the image. Returned coordinates stay in original-image
+        /// space, so they can be used for clicks directly.
+        #[arg(long, value_name = "L,T,R,B")]
+        crop: Option<String>,
     },
 }
 
@@ -57,7 +67,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             };
             solve_puzzle(&puzzle);
         }
-        Command::Analyze { file } => {
+        Command::Analyze { file, crop } => {
             let bytes = match file.as_deref() {
                 Some(p) if p.as_os_str() != "-" => {
                     std::fs::read(p).map_err(|e| format!("failed to read {}: {e}", p.display()))?
@@ -69,7 +79,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             };
             let img = image::load_from_memory(&bytes)?.to_rgb8();
-            let (puzzle, geo) = io::image::analyze_detailed(&img)?;
+            let crop = crop.as_deref().map(parse_crop).transpose()?;
+            let (puzzle, geo) = io::image::analyze_cropped(&img, crop)?;
             println!("{}", analyze_to_json(&puzzle, &geo));
         }
     }
@@ -157,6 +168,26 @@ fn solve_queens(puzzle: &QueensPuzzle) -> Vec<Cell> {
         return solutions.remove(0).queens();
     }
     Vec::new()
+}
+
+/// Parse "left,top,right,bottom" into a Crop box.
+fn parse_crop(spec: &str) -> Result<io::image::Crop, Box<dyn std::error::Error>> {
+    let parts: Vec<&str> = spec.split(',').map(|p| p.trim()).collect();
+    if parts.len() != 4 {
+        return Err(format!(
+            "--crop expects 4 comma-separated numbers (left,top,right,bottom), got {:?}",
+            spec
+        )
+        .into());
+    }
+    let nums: Result<Vec<u32>, _> = parts.iter().map(|p| p.parse::<u32>()).collect();
+    let nums = nums.map_err(|_| format!("--crop contains a non-number: {spec:?}"))?;
+    Ok(io::image::Crop {
+        left: nums[0],
+        top: nums[1],
+        right: nums[2],
+        bottom: nums[3],
+    })
 }
 
 /// Build the JSON payload describing the detected board and its solution.

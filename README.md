@@ -129,6 +129,31 @@ queens-puzzle analyze -                   # 也可由管道/程序写入
 queens-puzzle solve screenshot.png        # 输出：原始盘面、解完的盘面、难度评级
 ```
 
+#### 可选：用 `--crop` 指定棋盘的大致位置
+
+如果 App 布局固定（比如你已知棋盘总在某个区域），可以传入一个提示框缩小搜索范围，
+检测会更快也更确定：
+
+```sh
+queens-puzzle analyze --crop 0,700,1178,1900 screenshot.png
+queens-puzzle analyze --crop 0,700,1178,1900 -        # 同样可配合 stdin
+```
+
+关于 `--crop` 的语义，有几点值得说明：
+
+- **只是提示，不必精确**。框里检测照常进行，所以给一个比棋盘大的框（如上例）完全没问题。
+- **返回的坐标始终是原图坐标**。`cells[].x/y`、`board` 都已还原到原图坐标系，
+  可以直接用于点击，不需要自己加偏移。
+- **越界会被自动收敛**到图像边界（例如图宽 1179 却传了 `right=1779` 也不会报错）。
+- **给错了会兜底**：如果框内找不到棋盘，自动退回全图检测，而不是直接失败。
+
+Python 侧两个函数都接受 `crop` 参数：
+
+```python
+analyze_file("shot.png", crop=(0, 700, 1178, 1900))
+analyze_screenshot(png_bytes, crop=(0, 700, 1178, 1900))
+```
+
 成功时退出码 0，stdout 输出 JSON：
 
 ```json
