@@ -8,6 +8,9 @@ All notable changes to this project will be documented here.
 - **Web UI** (`web/`): Play, Solve, Editor, and Generator pages, Playwright tests, and GitHub Pages deployment
 - **WASM bindings** (`wasm/` crate) — its only consumer was the web UI
 - **CLI `generate` subcommand**; the CLI is now a pure solver
+- **Puzzle generator** (`core/src/generator.rs`, `shuffle_queens`): the project is solver-only. Also
+  drops the generator-only `assign_cell_region`/`unassign_cell_region` puzzle API and the now-unused
+  `rand` and `log` dependencies of `queens-puzzle-core`
 
 ## [0.2.0] - 2026-07-09
 

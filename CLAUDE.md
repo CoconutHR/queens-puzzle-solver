@@ -5,7 +5,7 @@
 ```
 queens-puzzle/
 ├── src/       CLI binary (depends on core; coloured output, clap, env_logger)
-├── core/      Library crate — solver, generator, puzzle types, IO
+├── core/      Library crate — solver, puzzle types, IO
 │   └── src/
 │       ├── io/json.rs    Canonical JSON format
 │       └── io/text.rs    Text/archive formats (used by the CLI)

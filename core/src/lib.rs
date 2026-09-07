@@ -1,4 +1,3 @@
-pub mod generator;
 pub mod grid;
 pub mod io;
 pub mod puzzle;

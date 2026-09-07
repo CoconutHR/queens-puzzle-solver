@@ -249,25 +249,6 @@ impl QueensPuzzle {
         }
     }
 
-    /// Assigns a region to a cell (panics if already assigned — legacy API used by generator)
-    pub fn assign_cell_region(&mut self, cell: Cell, region: u8) {
-        if self.cell_regions[cell].is_some() {
-            panic!("cell {cell} already has a region")
-        }
-        self.cell_regions[cell] = Some(region);
-        self.regions[region as usize].insert(cell);
-    }
-
-    /// Unassigns a region from a cell (panics if not assigned — legacy API used by generator)
-    pub fn unassign_cell_region(&mut self, cell: Cell) {
-        if self.cell_regions[cell].is_none() {
-            panic!("cell {cell} does not have a region")
-        }
-        let region = self.cell_regions[cell].unwrap();
-        self.regions[region as usize].remove(&cell);
-        self.cell_regions[cell] = None;
-    }
-
     /// Returns a hashset of cells in given row
     pub fn row_iter(&self, row: usize) -> HashSet<Cell> {
         self.board.row_iter(row)

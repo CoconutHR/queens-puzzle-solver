@@ -25,8 +25,7 @@ In Queens, an *n×n* board is divided into *n* coloured regions. The goal is to 
 - **Logical solver** that applies human-style techniques in order of increasing difficulty and
   rates the puzzle (Trivial / Easy / Medium / Hard) by the hardest technique it needed.
 - **Brute-force fallback** that finds all solutions for puzzles the logical solver can't crack.
-- **CLI** with colourful terminal output, step-by-step explanations, and batch generation of
-  puzzles guaranteed to have a unique solution.
+- **CLI** with colourful terminal output and step-by-step explanations.
 - Reads puzzles from a simple **text format** or from the **archived JSON** of past LinkedIn puzzles.
 
 > Terminal boards are rendered with true-colour region backgrounds; a terminal with 24-bit colour support gives the best results.
@@ -102,13 +101,6 @@ explanation (shown with `-v`). The difficulty is the hardest technique that was 
 
 If logic gets stuck, the **brute-force** solver places one queen per column recursively (respecting
 any queens already deduced) and reports the solution(s) it finds.
-
-### Generator
-
-The generator first places *n* non-attacking queens at random, then gives each queen its own
-single-cell region. It repeatedly grows regions into neighbouring cells, backtracking whenever a
-move would make the solution non-unique, until every cell is assigned. The result is guaranteed to
-have exactly one solution.
 
 ## Puzzle archive
 

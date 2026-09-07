@@ -5,10 +5,10 @@ use serde::{Deserialize, Serialize};
 /// The canonical puzzle interchange format: region layout plus optional metadata.
 #[derive(Serialize, Deserialize, Debug)]
 pub struct PuzzleJson {
-    /// Human-readable puzzle name; omitted by the solver/generator output
+    /// Human-readable puzzle name; omitted by the solver output
     #[serde(skip_serializing_if = "Option::is_none")]
     pub name: Option<String>,
-    /// Attribution; omitted by the solver/generator output
+    /// Attribution; omitted by the solver output
     #[serde(skip_serializing_if = "Option::is_none")]
     pub source: Option<String>,
     /// ISO 8601 date the puzzle was created or generated (YYYY-MM-DD); omitted by solver output

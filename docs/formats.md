@@ -55,6 +55,6 @@ The canonical interchange format for a puzzle: its region layout plus optional m
 - `states[row][col]` — `0` Unknown, `1` Queen, `2` Empty.
 - `states` is omitted when all cells are Unknown (i.e. an unsolved puzzle with no progress).
 - `n` is inferred from `regions.length`; the board is always square.
-- All optional fields are omitted when not set; the solver and generator do not emit them.
+- All optional fields are omitted when not set; the solver does not emit them.
 
 Implemented in `core/src/io/json.rs`.
