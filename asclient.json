@@ -1,0 +1,20 @@
+{
+  "language": "auto",
+  "device": {
+    "address": "127.0.0.1:9096",
+    "password": "",
+    "timeout": 15.0,
+    "retries": 1
+  },
+  "tunnel": {
+    "iproxy": "/opt/homebrew/bin/iproxy",
+    "local_host": "127.0.0.1",
+    "local_port": 9096,
+    "remote_port": 9096,
+    "local_log_port": 10102,
+    "remote_log_port": 10102,
+    "forward_logs": true,
+    "udid": "",
+    "startup_timeout": 8
+  }
+}
