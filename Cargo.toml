@@ -19,6 +19,7 @@ name = "queens-puzzle"
 path = "src/main.rs"
 
 [dependencies]
+libc = "0.2"
 queens-puzzle-core = { path = "core" }
 clap = { version = "4.6.1", features = ["derive"] }
 colored = "2.1.0"

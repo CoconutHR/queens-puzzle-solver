@@ -39,20 +39,12 @@ pub fn parse_regions(input: &str) -> Result<QueensPuzzle, String> {
     Ok(QueensPuzzle::new(regions))
 }
 
-pub fn read_puzzle_text(path: PathBuf) -> QueensPuzzle {
+pub fn read_puzzle_text(path: PathBuf) -> Result<QueensPuzzle, Box<dyn std::error::Error>> {
     let puzzle_str = fs::read_to_string(&path)
-        .map_err(|e| {
-            eprintln!("Failed to read puzzle file {}: {}", path.display(), e);
-            std::process::exit(1);
-        })
-        .unwrap();
+        .map_err(|e| format!("failed to read puzzle file {}: {e}", path.display()))?;
 
     let puzzle = parse_regions(&puzzle_str)
-        .map_err(|e| {
-            eprintln!("Failed to parse puzzle: {}", e);
-            std::process::exit(1);
-        })
-        .unwrap();
+        .map_err(|e| format!("failed to parse puzzle: {e}"))?;
 
-    puzzle
+    Ok(puzzle)
 }

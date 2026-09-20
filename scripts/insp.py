@@ -1,8 +1,8 @@
-"""通过 USB 隧道等待并点击“下一题”按钮。"""
-
 from asclient import AScriptTunnel, connect
 from asclient.config import device_options, load_config
 from asclient.errors import AScriptError
+from asclient.inspector import run_forever
+
 
 def main() -> None:
     options = device_options(load_config())
@@ -13,13 +13,12 @@ def main() -> None:
                 tunnel.address,
                 password=options.get("password", ""),
             )
-
-            device.client.tap_image("scripts/橙色.png", confidence=0.98, timeout=5, region_relative=(0, 0.6, 0.5, 0.9))
-            print("已点击下一题")
-
+            run_forever(device.client, host="127.0.0.1", port=0, open_browser=True)
     except AScriptError as exc:
-        raise SystemExit(f"点击失败：{exc}") from exc
-    
+        raise SystemExit(f"打开inspect失败：{exc}") from exc
+
 
 if __name__ == "__main__":
     main()
+
+

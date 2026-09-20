@@ -4,3 +4,9 @@
 .DS_Store
 .workbuddy/
 tmp/
+
+# 调试临时文件
+.temp/
+# Python 缓存
+__pycache__/
+*.pyc
