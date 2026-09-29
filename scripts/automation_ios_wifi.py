@@ -192,7 +192,23 @@ def main(argv: list[str] | None = None) -> int:
 
         with client.locked():
             png = client.screenshot()                  # 无损 PNG，不用 HID JPEG
-        result = analyze_bytes(solver, png, crop=crop)
+        try:
+            result = analyze_bytes(solver, png, crop=crop)
+        except AnalyzeError:
+            ts = time.strftime("%Y%m%d_%H%M%S")
+            full_path = Path(f"fail_{ts}.png")
+            full_path.write_bytes(png)
+            print(f"识别失败，整图已保存：{full_path.resolve()}", file=sys.stderr)
+            if crop:
+                try:
+                    import io as _io
+                    from PIL import Image as _Image
+                    crop_path = Path(f"fail_{ts}_crop.png")
+                    _Image.open(_io.BytesIO(png)).crop(crop).save(crop_path)
+                    print(f"裁剪区域已保存：{crop_path.resolve()}", file=sys.stderr)
+                except ImportError:
+                    print("（未安装 Pillow，跳过裁剪图保存；pip install pillow 后可保存）", file=sys.stderr)
+            raise
 
         size, difficulty, board = result.get("size"), result.get("difficulty"), result.get("board")
         print(f"棋盘 {size}x{size}  难度 {difficulty or '无评级'}  区域 {board}")
