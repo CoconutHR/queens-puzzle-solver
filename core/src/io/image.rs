@@ -38,7 +38,7 @@ const MIN_CELL_PIXELS: usize = 12;
 const MAX_CELL_SIZE_CV: f32 = 0.10;
 
 /// 格间距的变异系数上限。
-const MAX_CELL_SPACING_CV: f32 = 0.18;
+const MAX_CELL_SPACING_CV: f32 = 0.3;
 
 /// 格子内部彩色像素占比下限，用于排除"看着像格子其实是空的"误判。
 const MIN_CELL_OCCUPANCY: f32 = 0.70;
