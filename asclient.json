@@ -2,6 +2,7 @@
   "language": "auto",
   "device": {
     "address": "127.0.0.1:9096",
+    "ipport": "192.168.3.17:9096",
     "password": "",
     "timeout": 15.0,
     "retries": 1

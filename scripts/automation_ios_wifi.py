@@ -229,11 +229,14 @@ def main(argv: list[str] | None = None) -> int:
             return 0
 
         with client.locked():
+            # 分析期间 HID 会话空闲，第一次 double_tap 的两下会被冷启动
+            # 拉成几百 ms 间隔，游戏判定为"两次单击"（打叉+取消）。
+            # 先做一次热身 tap + 等待，把 HID 通路热起来。
+            client.tap(700, 700)           # 屏幕顶部中央，非棋盘区域
+            time.sleep(0.2)                 # 给服务端 + iOS 足够时间
+
             for index, (x, y) in enumerate(points, start=1):
-                # 格子状态由点击切换；这里沿用 double_tap，实测可正常落子。
-                # 若日后想改成单次 tap，请先用 --dry-run 验证一次再上线。
-                # 坐标与截图同一物理像素坐标系。
-                client.double_tap(x, y, interval=0.01)
+                client.double_tap(x, y, interval=0.005)
                 print(f"[{index}/{len(points)}] tap ({x}, {y})")
                 if index < len(points):
                     time.sleep(args.tap_delay)
