@@ -839,6 +839,7 @@ dependencies = [
  "clap",
  "colored",
  "image",
+ "libc",
  "queens-puzzle-core",
  "serde",
  "serde_json",

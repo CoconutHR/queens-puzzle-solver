@@ -41,10 +41,18 @@ BOARD_CROP: tuple[int, int, int, int] | None = (0, 710, 1179, 1880)
 
 
 class AnalyzeError(RuntimeError):
-    """求解器调用失败：含退出码与 stderr，便于排查。"""
+    """求解器调用失败：带 kind / 退出码 / stderr，便于分类处理。"""
 
-    def __init__(self, message: str, *, returncode: int | None = None, stderr: str = "") -> None:
+    def __init__(
+        self,
+        message: str,
+        *,
+        kind: str | None = None,
+        returncode: int | None = None,
+        stderr: str = "",
+    ) -> None:
         super().__init__(message)
+        self.kind = kind
         self.returncode = returncode
         self.stderr = stderr
 
@@ -62,12 +70,24 @@ def resolve_solver(candidate: str) -> str:
     return found
 
 
-def analyze_bytes(solver: str, image: bytes, *, crop: tuple[int, int, int, int] | None = None,
-                  timeout: float = ANALYZE_TIMEOUT) -> dict[str, Any]:
-    """把 PNG 字节经 stdin 送进 `analyze -`，返回解析后的 JSON。
+def analyze_bytes(
+    solver: str,
+    image: bytes,
+    *,
+    crop: tuple[int, int, int, int] | None = None,
+    timeout: float = ANALYZE_TIMEOUT,
+) -> dict[str, Any]:
+    """把 PNG 字节经 stdin 送进 `analyze -`，返回信封里的 `data`。
+
+    求解器（queens-puzzle）现在返回统一信封：
+        成功：{"ok": true,  "data": {...}}        退出码 0
+        失败：{"ok": false, "error": {"kind": ..., "message": ...}}  退出码 1
 
     crop 为可选搜索提示框（left, top, right, bottom）。它只缩小检测范围，
     返回坐标仍是原图坐标系；框内找不到棋盘时求解器自动回退全图检测。
+
+    成功 → 返回 data（dict）
+    失败 → 抛 AnalyzeError（kind 来自求解器的 error.kind）
     """
     command = [solver, "analyze"]
     if crop:
@@ -84,23 +104,35 @@ def analyze_bytes(solver: str, image: bytes, *, crop: tuple[int, int, int, int] 
     except subprocess.TimeoutExpired as exc:
         raise AnalyzeError(f"求解器超时（>{timeout}s）") from exc
 
-    if proc.returncode != 0:
-        raise AnalyzeError(
-            "求解器执行失败",
-            returncode=proc.returncode,
-            stderr=proc.stderr.decode("utf-8", "replace").strip(),
-        )
+    stdout_text = proc.stdout.decode("utf-8", "replace").strip()
     try:
-        result = json.loads(proc.stdout.decode("utf-8"))
-    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        envelope = json.loads(stdout_text)
+    except json.JSONDecodeError as exc:
         raise AnalyzeError(
             "求解器输出不是合法 JSON",
             returncode=proc.returncode,
-            stderr=proc.stdout[:500].decode("utf-8", "replace"),
+            stderr=stdout_text[:500],
         ) from exc
-    if not isinstance(result, dict):
-        raise AnalyzeError(f"求解器返回了非对象 JSON：{type(result).__name__}")
-    return result
+
+    if not isinstance(envelope, dict) or "ok" not in envelope:
+        raise AnalyzeError(
+            f"求解器返回的信封格式异常：{envelope!r}",
+            returncode=proc.returncode,
+        )
+
+    if not envelope["ok"]:
+        err = envelope.get("error") or {}
+        raise AnalyzeError(
+            err.get("message", "求解器报告失败"),
+            kind=err.get("kind"),
+            returncode=proc.returncode,
+            stderr=proc.stderr.decode("utf-8", "replace").strip(),
+        )
+
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        raise AnalyzeError("求解器返回的 data 不是对象", returncode=proc.returncode)
+    return data
 
 
 def queen_pixels(result: dict[str, Any]) -> list[tuple[int, int]]:
@@ -113,7 +145,7 @@ def queen_pixels(result: dict[str, Any]) -> list[tuple[int, int]]:
 
 
 def wait_until_ready(client: Any, *, timeout: float = READY_TIMEOUT) -> dict[str, Any]:
-    """隧道建立后，设备服务可能还要一两秒才可用，轮询等待。"""
+    """连接建立后，设备服务可能还要一两秒才可用，轮询等待。"""
     deadline = time.monotonic() + timeout
     last: Exception | None = None
     while time.monotonic() < deadline:
@@ -122,7 +154,7 @@ def wait_until_ready(client: Any, *, timeout: float = READY_TIMEOUT) -> dict[str
         except AScriptError as exc:          # 连接层异常，重试；业务错误不重试
             last = exc
             time.sleep(0.5)
-    raise AScriptError(f"隧道已建立，但设备服务在 {timeout}s 内不可用：{last}")
+    raise AScriptError(f"连接已建立，但设备服务在 {timeout}s 内不可用：{last}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,9 +214,10 @@ def main(argv: list[str] | None = None) -> int:
 
         with client.locked():
             for index, (x, y) in enumerate(points, start=1):
-                # Queens 棋盘每次点击会切换格子状态；必须单击。双击会
-                # 在同一格执行两次切换，最终回到未选中状态，看起来像“没有点击”。
-                client.double_tap(x, y, interval=0.01)                # 与截图同一物理像素坐标系
+                # 格子状态由点击切换；这里沿用 double_tap，实测可正常落子。
+                # 若日后想改成单次 tap，请先用 --dry-run 验证一次再上线。
+                # 坐标与截图同一物理像素坐标系。
+                client.double_tap(x, y, interval=0.01)
                 print(f"[{index}/{len(points)}] tap ({x}, {y})")
                 if index < len(points):
                     time.sleep(args.tap_delay)
@@ -192,7 +225,8 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     except AnalyzeError as exc:
-        print(f"识别失败：{exc}", file=sys.stderr)
+        kind = f"[{exc.kind}] " if exc.kind else ""
+        print(f"识别失败：{kind}{exc}", file=sys.stderr)
         if exc.stderr:
             print(f"求解器 stderr（退出码 {exc.returncode}）：\n{exc.stderr}", file=sys.stderr)
         return 2
@@ -206,5 +240,7 @@ def main(argv: list[str] | None = None) -> int:
     except (FileNotFoundError, ValueError, KeyError, IndexError) as exc:
         print(f"参数或数据错误：{exc}", file=sys.stderr)
         return 4
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
