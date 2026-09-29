@@ -53,7 +53,7 @@ const SAMPLE_MIN_CHROMA: u8 = 8;
 /// 注意：这个值很关键。棋盘常用"同色相、不同明度"的配色（如深粉/浅粉、
 /// 深绿/浅绿），阈值过大会把它们合并成一类，导致区域数少于 n。
 /// 实测 0.16 会误合并，0.10 及以下稳定正确，这里取 0.08 留余量。
-const COLOR_DISTANCE_THRESHOLD: f32 = 0.08;
+const COLOR_DISTANCE_THRESHOLD: f32 = 0.07;
 
 /// Read a Queens puzzle from an image file (PNG / JPEG / WebP) and return the corresponding puzzle.
 ///
