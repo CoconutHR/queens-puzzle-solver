@@ -173,14 +173,27 @@ fn detect_by_projection(img: &RgbImage) -> Option<Grid> {
             continue;
         }
 
-        // 棋盘必须是 N × N
-        if x_runs.len() != local_y.len() {
+        // 棋盘必须是 N × N。允许 x/y run 数相差 ≤ 2，此时合并较多一侧里
+        // 「合并后让尺寸变异系数最小」的那一对相邻 run，作为修正。
+        // 差太多、或修不出均匀结果，才按 dimension_mismatch 拒绝。
+        let x_len = x_runs.len();
+        let y_len = local_y.len();
+        let (x_runs, local_y) = match reconcile_runs_pair(x_runs, local_y) {
+            Some(pair) => pair,
+            None => {
+                eprintln!(
+                    "[DEBUG]   grid dimension mismatch: x_runs={} y_runs={}",
+                    x_len, y_len
+                );
+                *reject_reasons.entry("dimension_mismatch").or_insert(0) += 1;
+                continue;
+            }
+        };
+        if x_len != y_len {
             eprintln!(
-                "[DEBUG]   grid dimension mismatch: x_runs={} y_runs={}",
-                x_runs.len(), local_y.len()
+                "[DEBUG]   reconciled dimension: {} (was x={} y={})",
+                x_runs.len(), x_len, y_len
             );
-            *reject_reasons.entry("dimension_mismatch").or_insert(0) += 1;
-            continue;
         }
         let size = x_runs.len();
 
@@ -377,6 +390,83 @@ fn find_runs(
     }
     out.push(current);
     out
+}
+
+/// 当 x/y 方向的 run 数不一致但相差 ≤ 2 时，尝试合并较多一侧中
+/// 「合并后尺寸 CV 最小」的相邻 run，使数量对齐。
+/// 返回修正后的 (x_runs, y_runs)；无法安全修正时返回 None。
+fn reconcile_runs_pair(
+    x_runs: Vec<(usize, usize)>,
+    y_runs: Vec<(usize, usize)>,
+) -> Option<(Vec<(usize, usize)>, Vec<(usize, usize)>)> {
+    const MAX_DIFF: usize = 2;
+
+    if x_runs.len() == y_runs.len() {
+        return Some((x_runs, y_runs));
+    }
+    if x_runs.len().abs_diff(y_runs.len()) > MAX_DIFF {
+        return None;
+    }
+
+    let target = x_runs.len().min(y_runs.len());
+    if target < 4 {
+        return None;
+    }
+
+    let x_fixed = if x_runs.len() > target {
+        merge_runs_down(x_runs, target)?
+    } else {
+        x_runs
+    };
+    let y_fixed = if y_runs.len() > target {
+        merge_runs_down(y_runs, target)?
+    } else {
+        y_runs
+    };
+
+    if x_fixed.len() == y_fixed.len() {
+        Some((x_fixed, y_fixed))
+    } else {
+        None
+    }
+}
+
+/// 反复合并「合并后让尺寸变异系数最小」的相邻 run，直到数量降到 target。
+fn merge_runs_down(mut runs: Vec<(usize, usize)>, target: usize) -> Option<Vec<(usize, usize)>> {
+    if target == 0 || runs.len() < target {
+        return None;
+    }
+
+    while runs.len() > target {
+        let n = runs.len();
+        let mut best_i = 0usize;
+        let mut best_cv = f32::INFINITY;
+
+        for i in 0..n - 1 {
+            let merged_size = runs[i + 1].1 - runs[i].0 + 1;
+            // 用 usizes 拼出合并后的尺寸列表，再算 CV
+            let mut sizes: Vec<usize> = Vec::with_capacity(n - 1);
+            for (j, &(a, b)) in runs.iter().enumerate() {
+                if j == i {
+                    sizes.push(merged_size);
+                } else if j == i + 1 {
+                    // 已被合并进 i，跳过
+                } else {
+                    sizes.push(b - a + 1);
+                }
+            }
+            let cv = coefficient_of_variation(&sizes);
+            if cv < best_cv {
+                best_cv = cv;
+                best_i = i;
+            }
+        }
+
+        runs[best_i].1 = runs[best_i + 1].1;
+        runs.remove(best_i + 1);
+    }
+
+    Some(runs)
 }
 
 /// 判断检测出的棋盘边长是否合理。
